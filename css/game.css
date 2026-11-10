@@ -7,6 +7,9 @@
   --font: ui-rounded, "SF Pro Rounded", "Nunito", "Varela Round", system-ui, -apple-system, "Segoe UI", sans-serif;
   --pad: 58px;
   --crew: 54px;
+  --row2: 60px;  /* where the second and third crew of a line sit */
+  --row3: 106px;
+  --queues: 156px;
   color-scheme: light;
 }
 * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
@@ -17,6 +20,7 @@ html, body {
   -webkit-user-select: none; user-select: none; touch-action: manipulation;
 }
 button { font: inherit; color: inherit; border: 0; background: none; cursor: pointer; }
+button:focus-visible { outline: 3px solid var(--ink); outline-offset: 2px; }
 
 #app {
   position: relative; margin: 0 auto; max-width: 520px; height: 100dvh;
@@ -24,21 +28,39 @@ button { font: inherit; color: inherit; border: 0; background: none; cursor: poi
   padding: env(safe-area-inset-top) 0 0;
 }
 
-/* ---- top bar: previous level, the level's name (tap to restart), next level ---- */
-.top { display: grid; grid-template-columns: 52px 1fr 52px; align-items: center; padding: 8px 12px 0; gap: 8px; }
+/* ---- top bar: previous level, the level's name (tap to restart) with its progress, next level,
+   and the sound button. The empty first cell keeps the name in the middle. ---- */
+.top { display: grid; grid-template-columns: 36px 46px minmax(0, 1fr) 46px 36px; align-items: center; padding: 8px 8px 0; gap: 6px; }
 .nav {
-  width: 48px; height: 48px; border-radius: 16px; display: grid; place-items: center;
+  width: 46px; height: 46px; border-radius: 16px; display: grid; place-items: center;
   background: var(--glass); border: 1.5px solid var(--glass-edge);
 }
 .nav svg { width: 26px; height: 26px; fill: none; stroke: var(--ink); stroke-width: 3; stroke-linecap: round; stroke-linejoin: round; }
-.nav:active, .title:active { transform: translateY(2px); }
+.nav:active, .title:active, .sound:active { transform: translateY(2px); }
 .title {
-  justify-self: center; text-align: center; min-height: 52px; padding: 2px 18px 4px; border-radius: 16px;
+  justify-self: center; max-width: 100%; min-width: 0; text-align: center; min-height: 52px; padding: 2px 12px 5px; border-radius: 16px;
   background: var(--glass); border: 1.5px solid var(--glass-edge);
 }
 .title h1 { margin: 0; font-size: 24px; font-weight: 900; letter-spacing: 0.3px; line-height: 1.15; }
 .title .sub { display: flex; justify-content: center; align-items: center; gap: 6px; min-height: 20px; font-size: 15px; font-weight: 800; color: var(--ink-soft); }
-.title .redo { width: 15px; height: 15px; fill: none; stroke: var(--ink-soft); stroke-width: 3; stroke-linecap: round; stroke-linejoin: round; }
+.title .sub > span { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.title .redo { width: 15px; height: 15px; flex: none; fill: none; stroke: var(--ink-soft); stroke-width: 3; stroke-linecap: round; stroke-linejoin: round; }
+/* how much of the sculpture is gone; it flashes in a colour's own shade when that colour is cleared */
+.progress { display: block; height: 5px; margin: 3px 2px 0; border-radius: 3px; background: rgba(31, 37, 71, 0.13); }
+.progress i {
+  display: block; height: 100%; border-radius: inherit; transform-origin: 0 50%; transform: scaleX(0);
+  background: linear-gradient(90deg, #ff6fb3, #ffb03f); transition: transform 0.15s ease-out;
+}
+.sound {
+  position: relative; width: 36px; height: 36px; border-radius: 12px; display: grid; place-items: center;
+  background: var(--glass); border: 1.5px solid var(--glass-edge);
+}
+.sound::before { content: ""; position: absolute; inset: -5px; } /* a 46 px place to tap */
+.sound svg { width: 20px; height: 20px; fill: none; stroke: var(--ink); stroke-width: 2.4; stroke-linecap: round; stroke-linejoin: round; }
+.sound .speaker { fill: var(--ink); }
+.sound[aria-pressed="true"] .off, .sound[aria-pressed="false"] .on { display: none; }
+.sound[aria-pressed="false"] svg { stroke: var(--ink-soft); }
+.sound[aria-pressed="false"] .speaker { fill: var(--ink-soft); }
 
 /* ---- 3D stage ---- */
 .stage { position: relative; flex: 1; min-height: 200px; touch-action: none; }
@@ -48,6 +70,24 @@ button { font: inherit; color: inherit; border: 0; background: none; cursor: poi
   padding: 10px 16px; border-radius: 16px; background: rgba(31, 37, 71, 0.86); color: #fff;
   font-weight: 800; font-size: 18px; pointer-events: none;
 }
+/* level 1, until the first send */
+.hint {
+  position: absolute; left: 50%; bottom: 10px; transform: translateX(-50%); width: max-content; max-width: calc(100% - 20px);
+  display: grid; gap: 1px; padding: 7px 14px 8px; border-radius: 16px; text-align: center; pointer-events: none;
+  background: rgba(255, 255, 255, 0.78); border: 1.5px solid var(--glass-edge); box-shadow: 0 4px 12px rgba(31, 37, 71, 0.12);
+}
+.hint b { font-size: 17px; font-weight: 900; }
+.hint span { font-size: 14px; font-weight: 700; color: var(--ink-soft); }
+.hint[hidden] { display: none; }
+/* every level cleared: stays until a tap */
+.ending {
+  position: absolute; inset: 0; display: grid; place-content: center; justify-items: center; gap: 10px;
+  text-align: center; pointer-events: none; animation: ending 0.5s cubic-bezier(.2, .9, .3, 1.3);
+}
+.ending[hidden] { display: none; }
+.ending b { padding: 12px 22px; border-radius: 20px; background: rgba(31, 37, 71, 0.88); color: #fff; font-size: 32px; font-weight: 900; }
+.ending span { padding: 7px 16px; border-radius: 14px; background: rgba(255, 255, 255, 0.8); font-size: 18px; font-weight: 800; }
+@keyframes ending { from { transform: scale(0.6); opacity: 0; } }
 /* shown until the game's scripts have built the first level */
 .loading { position: absolute; inset: 0; display: grid; place-content: center; justify-items: center; gap: 14px; color: var(--ink-soft); font-size: 17px; }
 .loading[hidden] { display: none; }
@@ -65,6 +105,8 @@ button { font: inherit; color: inherit; border: 0; background: none; cursor: poi
   box-shadow: inset 0 3px 8px rgba(31, 37, 71, 0.16);
   display: grid; place-items: end center;
 }
+/* a crew member is parked here, waiting for the cubes above its colour to go */
+.pad.waiting { border-style: dashed; border-color: rgba(74, 80, 120, 0.45); background: rgba(255, 255, 255, 0.35); }
 .pad.stuck { animation: stuck 0.9s ease-in-out infinite; }
 @keyframes stuck { 50% { box-shadow: inset 0 3px 8px rgba(31, 37, 71, 0.16), 0 0 0 3px #ff4b5c; } }
 
@@ -101,19 +143,52 @@ button { font: inherit; color: inherit; border: 0; background: none; cursor: poi
 }
 .crew.egg .eyes { display: none; }
 .crew.egg .n { bottom: 12px; font-size: 26px; }
-.crew.busy .eyes i::after { top: 0; }
 
-/* ---- queues ---- */
+/* Ready: its colour has a cube with nothing on top, so it pops the moment it is up (bright, a
+   white rim and a glow, eyes up; a front of a line also hops now and then). Asleep: every cube
+   of its colour is under something else, so sent now it would only park on a pad (dim, eyes
+   shut, "zz"). js/main.js sets these from the same test the rules use. */
+.crew.ready .body {
+  box-shadow: inset 0 -5px 0 color-mix(in srgb, var(--c) 70%, #000), 0 4px 8px rgba(31, 37, 71, 0.22),
+    0 0 0 2.5px rgba(255, 255, 255, 0.95), 0 0 14px 3px color-mix(in srgb, var(--c) 60%, #fff);
+}
+.crew.ready .eyes i::after { top: 0; }
+.front .crew.ready .body { animation: hop 1.8s ease-in-out infinite; animation-delay: calc(var(--k, 0) * -0.35s); }
+@keyframes hop {
+  0%, 72%, 100% { transform: translateY(0); }
+  82% { transform: translateY(-5px) scale(1.03, 0.97); }
+  92% { transform: translateY(0) scale(1.05, 0.93); }
+}
+.crew.asleep { opacity: 0.8; }
+.crew.asleep .body { filter: saturate(0.5) brightness(0.92); }
+.crew.asleep .eyes { top: 22%; }
+.crew.asleep .eyes i { height: 3px; border-radius: 2px; background: rgba(20, 22, 40, 0.7); box-shadow: none; }
+.crew.asleep .eyes i::after { display: none; }
+.crew.asleep::after {
+  content: "zz"; position: absolute; right: -3px; top: -5px; padding: 1px 4px 2px; border-radius: 8px;
+  background: #fff; color: var(--ink-soft); font-size: 11px; font-weight: 900; line-height: 1; letter-spacing: -0.5px;
+  box-shadow: 0 1px 3px rgba(31, 37, 71, 0.25);
+}
+/* a rear crew member was tapped: this front is the one that goes */
+.front .crew.nudge .body { animation: nudge 0.55s ease-out; }
+@keyframes nudge {
+  0% { transform: scale(1); }
+  30% { transform: translateY(-8px) scale(1.1); box-shadow: 0 0 0 4px #fff, 0 0 18px 6px color-mix(in srgb, var(--c) 60%, #fff); }
+  100% { transform: scale(1); }
+}
+
+/* ---- queues: the front of each line is the button; the two behind it stand back ---- */
 .queues {
-  display: flex; justify-content: center; gap: 12px; height: 182px; padding: 4px 10px 0; overflow: hidden;
+  display: flex; justify-content: center; gap: 12px; height: var(--queues); padding: 8px 10px 0; flex: none; /* never shrinks: the sculpture gives way */
   margin-bottom: calc(10px + env(safe-area-inset-bottom));
 }
 .col { position: relative; width: var(--crew); }
-.col .slot { position: absolute; left: 0; padding: 0; transition: transform 0.25s cubic-bezier(.2, .9, .3, 1.2); }
+.col .slot { position: absolute; left: 0; padding: 0; transform-origin: 50% 0; }
 .col .s1 { top: 0; z-index: 3; }
-.col .s2 { top: 60px; z-index: 2; opacity: 0.92; }
-.col .s3 { top: 120px; z-index: 1; opacity: 0.7; }
-.col .front::before { content: ""; position: absolute; inset: -4px -6px -8px; border-radius: 18px; } /* a bigger place to tap */
+.col .s2 { top: var(--row2); z-index: 2; transform: scale(0.82); filter: saturate(0.75) brightness(0.97); opacity: 0.85; }
+.col .s3 { top: var(--row3); z-index: 1; transform: scale(0.66); filter: saturate(0.55) brightness(0.95); opacity: 0.6; }
+.col .front { border-radius: 18px; }
+.col .front::before { content: ""; position: absolute; inset: -4px -6px -2px; border-radius: 18px; } /* a bigger place to tap */
 .col .front:active .crew { transform: scale(0.94); }
 .col.empty::after {
   content: ""; position: absolute; left: 50%; top: 18px; width: 18px; height: 18px; transform: translateX(-50%);
@@ -126,12 +201,29 @@ button { font: inherit; color: inherit; border: 0; background: none; cursor: poi
 #haptic { position: fixed; left: -100px; top: -100px; width: 1px; height: 1px; overflow: hidden; opacity: 0; }
 
 @media (max-height: 700px) {
-  :root { --pad: 50px; --crew: 48px; }
-  .queues { height: 162px; }
-  .col .s2 { top: 54px; }
-  .col .s3 { top: 108px; }
+  :root { --pad: 50px; --crew: 48px; --row2: 54px; --row3: 94px; --queues: 138px; }
+}
+/* Short windows (a phone held sideways, a short laptop window): the sculpture on the left, the
+   top bar, pads and lines on the right, so the lines are never cut off. */
+@media (max-height: 520px) and (min-width: 560px) {
+  #app {
+    max-width: none; display: grid;
+    grid-template-columns: minmax(0, 1fr) minmax(300px, 380px);
+    grid-template-rows: auto auto minmax(0, 1fr);
+    grid-template-areas: "stage top" "stage pads" "stage queues";
+    padding: env(safe-area-inset-top) env(safe-area-inset-right) 0 env(safe-area-inset-left);
+  }
+  .top { grid-area: top; }
+  .stage { grid-area: stage; min-height: 0; }
+  .pads { grid-area: pads; padding-top: 10px; }
+  .queues { grid-area: queues; align-self: start; }
+}
+/* short and narrow: everything stays in one column, with less room for the sculpture */
+@media (max-height: 520px) and (max-width: 559.98px) {
+  .stage { min-height: 120px; }
 }
 @media (prefers-reduced-motion: reduce) {
-  .col .slot { transition: none; }
-  .loading i { animation: none; }
+  .loading i, .front .crew.ready .body, .ending { animation: none; }
+  .front .crew.nudge .body { animation: none; box-shadow: 0 0 0 4px #fff, 0 0 18px 6px color-mix(in srgb, var(--c) 60%, #fff); }
+  .progress i { transition: none; }
 }
