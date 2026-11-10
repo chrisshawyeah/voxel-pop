@@ -17,6 +17,12 @@ const tap = async (page: any, good: boolean) =>
     return true;
   }, good);
 
+// Fails unless at least one crew member is drawn on a launch pad right now.
+const onPads = async (page: any) => {
+  const n = await page.evaluate(() => document.querySelectorAll("#pads .pad .crew").length);
+  if (!n) throw new Error("no crew on the pads after the taps");
+};
+
 const state = (page: any) => page.evaluate(() => ({ s: (window as any).crumble.state, level: (window as any).crumble.level }));
 
 export const journeys = [
@@ -28,8 +34,7 @@ export const journeys = [
     steps: [
       { goto: "/voxel-pop/?level=1", caption: "Level 1" },
       { expect: "Level 1", caption: "Toadstool" },
-      { run: async (ctx: any) => { await tap(ctx.page, true); await ctx.page.waitForTimeout(200); await tap(ctx.page, true); await ctx.page.waitForTimeout(200); await tap(ctx.page, true); } },
-      { expect: "#pads .pad .crew", caption: "Crew on the pads" },
+      { caption: "Crew on the pads", run: async (ctx: any) => { await tap(ctx.page, true); await ctx.page.waitForTimeout(200); await tap(ctx.page, true); await ctx.page.waitForTimeout(200); await tap(ctx.page, true); await onPads(ctx.page); } },
       {
         caption: "Popping every cube",
         run: async (ctx: any) => {
@@ -59,8 +64,7 @@ export const journeys = [
       { click: "#prev", caption: "Back one" },
       { click: "#prev", caption: "Back again" },
       { expect: "Level 2", caption: "Level 2", highlight: true },
-      { run: async (ctx: any) => { await tap(ctx.page, true); await ctx.page.waitForTimeout(200); await tap(ctx.page, true); } },
-      { expect: "#pads .pad .crew", caption: "Crew go up" },
+      { caption: "Crew go up", run: async (ctx: any) => { await tap(ctx.page, true); await ctx.page.waitForTimeout(200); await tap(ctx.page, true); await onPads(ctx.page); } },
       { click: "#again", caption: "Start it again" },
       {
         caption: "Fresh level",
