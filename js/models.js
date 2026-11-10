@@ -14,8 +14,12 @@
 export const COLORS = {
   red: '#ff4b5c', orange: '#ff9a2e', yellow: '#ffd23f', green: '#36c46f', teal: '#1fc6bd',
   blue: '#3f7cff', purple: '#9a5cf5', pink: '#ff6fb3', white: '#f7f2e8', brown: '#a2683f',
-  charcoal: '#3a3e4b', cream: '#ffd7a3', grey: '#a7aec0', terracotta: '#e0714a',
+  charcoal: '#3a3e4b', cream: '#ffd7a3', grey: '#a7aec0', terracotta: '#e0714a', tan: '#c98a4b',
+  lilac: '#c7a6ff',
 };
+// No two colours in one sculpture should be easy to mix up: a player tells crew apart by colour
+// alone. Pale pairs (cream and white, cream and yellow), red and pink, blue and purple, and
+// terracotta and brown are the ones to avoid together.
 
 class Sculpt {
   constructor(sx, sy, sz) {
@@ -72,7 +76,7 @@ const hash = (x, y, z) => {
 function mushroom() {
   const s = new Sculpt(11, 10, 11);
   const { cx, cz } = s;
-  s.fill((x, y, z) => y <= 4 && sq(x - cx) + sq(z - cz) <= sq(1.9), 'cream');
+  s.fill((x, y, z) => y <= 4 && sq(x - cx) + sq(z - cz) <= sq(1.9), 'tan'); // the stem, darker than the white spots
   s.fill((x, y, z) => y >= 4 && sq(x - cx) / sq(5.1) + sq(y - 4) / sq(4.4) + sq(z - cz) / sq(5.1) <= 1, 'red');
   const spots = [[cx, 8.3, cz]];
   for (let k = 0; k < 5; k++) {
@@ -106,7 +110,7 @@ function cactus() {
   const r2 = (x, z) => sq(x - cx) + sq(z - cz);
   s.fill((x, y, z) => y <= 5 && r2(x, z) <= sq(3.4 + y * 0.28), 'terracotta');
   s.fill((x, y, z) => y >= 5 && y <= 6 && r2(x, z) <= sq(5.2), 'terracotta');
-  s.fill((x, y, z) => y === 6 && r2(x, z) <= sq(4.1), 'brown');
+  s.fill((x, y, z) => y === 6 && r2(x, z) <= sq(4.1), 'charcoal'); // the soil
   s.fill((x, y, z) => y >= 7 && y <= 16 && r2(x, z) <= sq(2.3), 'green');
   s.fill((x, y, z) => y >= 16 && sq(x - cx) + sq(y - 16) * 1.6 + sq(z - cz) <= sq(2.3), 'green');
   // left arm
@@ -271,7 +275,7 @@ function dolls() {
     const h = sq(x - cx) + sq(y - 17.8 * k * B) + sq(z - cz) <= sq(4.9 * k * B);
     return b || h;
   };
-  const layers = [[1, 'red'], [0.8, 'teal'], [0.6, 'yellow'], [0.4, 'pink']];
+  const layers = [[1, 'red'], [0.8, 'teal'], [0.6, 'yellow'], [0.4, 'purple']];
   for (const [k, c] of layers) s.fill((x, y, z) => inside(x, y, z, k), c);
   layers.forEach(([k], li) => {
     const next = layers[li + 1]?.[0] ?? 0;
@@ -302,10 +306,10 @@ function cupcake() {
     return Math.floor((a / (Math.PI * 2)) * 10) % 2 ? 'teal' : 'white';
   });
   s.paint((x, y, z) => y <= 5 && r2(x, z) <= sq(2.2 + y * 0.3), 'brown'); // the cake inside
-  s.fill((x, y, z) => y >= 6 && y <= 7 && r2(x, z) <= sq(5.9), 'pink'); // three rings of frosting
-  s.fill((x, y, z) => y >= 8 && y <= 9 && r2(x, z) <= sq(4.4), 'pink');
-  s.fill((x, y, z) => y >= 10 && y <= 11 && r2(x, z) <= sq(2.9), 'pink');
-  s.paint((x, y, z, cur) => cur === 'pink' && s.skin(x, y, z) && hash(x, y, z) < 0.12, 'yellow'); // sprinkles
+  s.fill((x, y, z) => y >= 6 && y <= 7 && r2(x, z) <= sq(5.9), 'lilac'); // three rings of frosting
+  s.fill((x, y, z) => y >= 8 && y <= 9 && r2(x, z) <= sq(4.4), 'lilac');
+  s.fill((x, y, z) => y >= 10 && y <= 11 && r2(x, z) <= sq(2.9), 'lilac');
+  s.paint((x, y, z, cur) => cur === 'lilac' && s.skin(x, y, z) && hash(x, y, z) < 0.12, 'yellow'); // sprinkles
   s.fill((x, y, z) => sq(x - cx) + sq(y - 13) + sq(z - cz) <= sq(1.5), 'red'); // the cherry
   return s.done();
 }
@@ -315,13 +319,13 @@ function burger() {
   const { cx, cz } = s;
   const r2 = (x, z) => sq(x - cx) + sq(z - cz);
   const disc = (y0, y1, r, c) => s.fill((x, y, z) => y >= y0 && y <= y1 && r2(x, z) <= sq(r), c);
-  disc(0, 2, 6.2, 'cream'); // bottom bun
+  disc(0, 2, 6.2, 'tan'); // bottom bun
   disc(3, 3, 7.0, 'green'); // lettuce
-  disc(4, 6, 6.4, 'brown'); // patty
+  disc(4, 6, 6.4, 'charcoal'); // patty
   s.fill((x, y, z) => y === 7 && Math.abs(x - cx) <= 6 && Math.abs(z - cz) <= 6, 'yellow'); // cheese, square so its corners poke out
   disc(8, 8, 6.0, 'red'); // tomato
-  s.fill((x, y, z) => y >= 9 && sq(x - cx) / sq(6.4) + sq(y - 9) / sq(3.6) + sq(z - cz) / sq(6.4) <= 1, 'cream'); // top bun
-  s.paint((x, y, z, cur) => cur === 'cream' && y >= 10 && !s.get(x, y + 1, z) && hash(x, y, z) < 0.22, 'white'); // sesame seeds
+  s.fill((x, y, z) => y >= 9 && sq(x - cx) / sq(6.4) + sq(y - 9) / sq(3.6) + sq(z - cz) / sq(6.4) <= 1, 'tan'); // top bun
+  s.paint((x, y, z, cur) => cur === 'tan' && y >= 10 && !s.get(x, y + 1, z) && hash(x, y, z) < 0.22, 'white'); // sesame seeds
   return s.done();
 }
 
@@ -345,7 +349,7 @@ function gift() {
   const s = new Sculpt(11, 13, 11);
   const { cx, cz } = s;
   s.fill((x, y, z) => y <= 8 && x >= 1 && x <= 9 && z >= 1 && z <= 9, 'blue');
-  s.fill((x, y) => y >= 9 && y <= 10, 'purple'); // the lid, a little wider than the box
+  s.fill((x, y) => y >= 9 && y <= 10, 'teal'); // the lid, a little wider than the box
   s.paint((x, y, z) => Math.abs(x - cx) < 0.6 || Math.abs(z - cz) < 0.6, 'yellow'); // ribbon
   s.paint((x, y, z) => y >= 2 && y <= 7 && Math.abs(x - cx) <= 2 && Math.abs(z - cz) <= 2, 'pink'); // the present inside
   s.paint((x, y, z) => y >= 3 && y <= 6 && Math.abs(x - cx) <= 1 && Math.abs(z - cz) <= 1, 'white');
@@ -410,7 +414,7 @@ function house() {
   const s = new Sculpt(15, 16, 13);
   const box = (x0, x1, y0, y1, z0, z1, c) => s.fill((x, y, z) => x >= x0 && x <= x1 && y >= y0 && y <= y1 && z >= z0 && z <= z1, c);
   box(0, 14, 0, 0, 0, 12, 'green'); // lawn
-  box(2, 12, 1, 8, 2, 10, 'cream'); // walls
+  box(2, 12, 1, 8, 2, 10, 'white'); // walls
   s.fill((x, y, z) => y >= 9 && y <= 14 && x >= 1 && x <= 13 && Math.abs(z - 6) <= 5.6 - (y - 9), 'red'); // roof
   box(7, 8, 1, 4, 10, 10, 'brown'); // door
   for (const x0 of [4, 10]) { box(x0, x0 + 1, 5, 6, 10, 10, 'blue'); box(x0, x0 + 1, 5, 6, 2, 2, 'blue'); } // windows
@@ -421,7 +425,7 @@ function house() {
 
 function patchwork() {
   const s = new Sculpt(9, 9, 9);
-  const names = ['red', 'yellow', 'blue', 'green', 'purple', 'orange'];
+  const names = ['red', 'yellow', 'blue', 'green', 'white', 'orange'];
   s.each((x, y, z) => names[(Math.floor(x / 3) + 2 * Math.floor(y / 3) + 3 * Math.floor(z / 3)) % 6]); // 27 blocks of 27 cubes
   return s.done();
 }
