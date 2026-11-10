@@ -9,7 +9,8 @@ import * as R from './logic.js';
 
 const $ = id => document.getElementById(id);
 const SAVE_KEY = 'crumble-crew.level';
-const FIRE_GAP = 1 / 15;  // seconds between two shots from one pad
+const FIRE_GAP = 1 / 30;  // seconds per tick of the rules: each pad sends at most one shot a tick, and a
+                          // shot lands R.FLIGHT ticks after it leaves (js/logic.js)
 const NEXT_AFTER = 1700;  // milliseconds of confetti before the next level starts
 
 // ---------- which level: ?level=7 in the address wins, then the one saved last time ----------
@@ -22,21 +23,22 @@ const fx = new Fx($('fx'));
 const sound = new Sound();
 const buzz = new Buzz($('haptic'));
 
-let L, st, gen = 0, state = 'play', jamClock = 0, winClock = 0, bannerTimer = 0;
-const inflight = new Map();
+let L, st, gen = 0, state = 'play', jamClock = 0, winClock = 0, bannerTimer = 0, clock = 0;
 let padEls = [];
+const leavers = new Set(); // crew that have sent their last shot, drawn leaving over a pad that is already free
 
 // ---------- level start ----------
 function start(n) {
   gen++;
   current = (n + LEVELS.length) % LEVELS.length;
   try { localStorage.setItem(SAVE_KEY, current); } catch { /* private mode */ }
-  L = buildLevel(current);
+  L = buildLevel(current); // a fresh copy of the level, dealt once and kept (js/levels.js)
   st = L.board;
   stage.load(st, L.model);
   fx.shots.length = 0;
-  inflight.clear();
-  state = 'play'; jamClock = 0; winClock = 0;
+  for (const el of leavers) el.remove();
+  leavers.clear();
+  state = 'play'; jamClock = 0; winClock = 0; clock = 0;
   $('level-name').textContent = `Level ${current + 1}`;
   $('level-sub').textContent = LEVELS[current].name;
   renderPads(); renderQueues();
@@ -139,27 +141,17 @@ function onSend(ci) {
 }
 
 // ---------- the loop ----------
-const choose = stage.chooser();
-
+// The rules run in ticks of FIRE_GAP (R.step in js/logic.js): the shots that are due land, then
+// every pad that can fire sends one. The screen only draws what each tick did.
 function tick(dt) {
-  for (let i = 0; i < st.slots.length; i++) {
-    const s = st.slots[i];
-    if (!s || s.leaving) continue;
-    s.cool = (s.cool || 0) - dt;
-    while (s.cool <= 0 && R.canFire(st, i)) {
-      s.cool += FIRE_GAP;
-      const cell = R.fire(st, i, choose);
-      if (cell < 0) break;
-      launch(i, s, cell);
-    }
-    if (s.cool < 0) s.cool = 0;
-    padEls[i]?.firstChild?.classList.toggle('busy', R.canFire(st, i));
-    if (s.count <= 0) s.leaving = true;
+  clock += dt;
+  while (clock >= FIRE_GAP) {
+    clock -= FIRE_GAP;
+    const { landed, shots } = R.step(st);
+    for (const shot of shots) launch(shot);
+    if (landed.length) afterHit();
   }
-  for (let i = 0; i < st.slots.length; i++) {
-    const s = st.slots[i];
-    if (s && s.leaving && !s.exiting && !inflight.get(s.id)) exit(i, s);
-  }
+  for (let i = 0; i < st.slots.length; i++) padEls[i]?.firstChild?.classList.toggle('busy', R.canFire(st, i));
   if (R.isWon(st)) {
     if (!fx.busy && !stage.flashes.size) { winClock += dt; if (winClock > 0.25) win(); }
     return;
@@ -167,41 +159,45 @@ function tick(dt) {
   if (R.isJammed(st) && !fx.busy) { jamClock += dt; if (jamClock > 0.8) jam(); } else jamClock = 0;
 }
 
-function launch(i, s, cell) {
-  const r = padEls[i].getBoundingClientRect();
-  inflight.set(s.id, (inflight.get(s.id) || 0) + 1);
-  setCount(i, s.count);
-  recoil(i);
+// A shot has left a pad for `cell`. The cube is taken now and goes when the rules land the shot;
+// the flying dot and the burst are only its picture. The burst comes when the dot arrives, which is
+// never later than the rules land it, so nothing under a cube is hit before that cube visibly pops.
+function launch({ slot, shooter, cell, freed }) {
+  const r = padEls[slot].getBoundingClientRect();
+  setCount(slot, shooter.count);
+  recoil(slot);
   const g = gen;
-  fx.shoot(r.left + r.width / 2, r.top + 6, st.palette[s.color], () => stage.screen(cell), () => {
+  fx.shoot(r.left + r.width / 2, r.top + 6, st.palette[shooter.color], () => stage.screen(cell), () => {
     if (g !== gen) return;
-    inflight.set(s.id, inflight.get(s.id) - 1);
     stage.hit(cell);
     sound.pop(); buzz.tick(110);
-    afterHit();
   });
+  if (freed) leave(slot);
 }
 
-function exit(i, s) {
-  s.exiting = true;
-  const el = padEls[i]?.firstChild;
-  const g = gen;
-  const done = () => {
-    if (g !== gen) return;
-    if (st.slots[i] === s) { R.release(st, i); renderPad(i); }
-  };
-  if (s.count <= 0) sound.done();
-  if (!el) return done();
-  el.animate([{ transform: 'scale(1)', opacity: 1 }, { transform: 'translateY(-24px) scale(1.25)', opacity: 0 }], { duration: 260, easing: 'ease-in' }).finished.then(done, done);
+// A crew member with nothing left to do leaves at once: its pad is free for the next one right
+// away, and the leaving picture is a copy laid over the page that nothing waits for.
+function leave(slot) {
+  const el = padEls[slot]?.firstChild;
+  const r = el?.getBoundingClientRect();
+  renderPad(slot);
+  sound.done();
+  if (!el) return;
+  Object.assign(el.style, { position: 'fixed', left: `${r.left}px`, top: `${r.top}px`, margin: '0', zIndex: '5' });
+  document.body.appendChild(el);
+  leavers.add(el);
+  const gone = () => { el.remove(); leavers.delete(el); };
+  el.animate([{ transform: 'scale(1)', opacity: 1 }, { transform: 'translateY(-24px) scale(1.25)', opacity: 0 }], { duration: 260, easing: 'ease-in' }).finished.then(gone, gone);
 }
 
-// Crew whose colour is gone from the sculpture leave.
+// Crew whose colour is gone from the sculpture leave (a dealt level never needs this: its crew
+// carry exactly as many shots as their colour has cubes).
 function afterHit() {
   const gone = R.purgeCleared(st);
   if (!gone.length) return;
   let queues = false;
   for (const g of gone) {
-    if (g.where === 'slot') g.shooter.leaving = true;
+    if (g.where === 'slot') leave(g.slot);
     else queues = true;
   }
   if (queues) renderQueues();

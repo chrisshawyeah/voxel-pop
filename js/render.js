@@ -143,24 +143,6 @@ export class Stage {
     return { x: r.left + (v.x * 0.5 + 0.5) * r.width, y: r.top + (-v.y * 0.5 + 0.5) * r.height };
   }
 
-  // Picks the target among exposed cubes: the one facing the camera most, with a little spread.
-  chooser() {
-    const cam = this.camera.position;
-    return set => {
-      let best = -1, score = -Infinity, n = 0;
-      const stride = set.size > 60 ? Math.ceil(set.size / 60) : 1;
-      let k = Math.floor(Math.random() * stride);
-      for (const i of set) {
-        if (k++ % stride) continue;
-        const w = this.world(i);
-        const s = -w.distanceTo(cam) + Math.random() * 3;
-        if (s > score) { score = s; best = i; }
-        if (++n > 60) break;
-      }
-      return best;
-    };
-  }
-
   // The cube was hit: it flashes white and swells for a moment, then bursts into chips.
   hit(i) {
     const id = this.idOf[i];
