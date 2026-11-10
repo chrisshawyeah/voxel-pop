@@ -58,7 +58,7 @@ button { font: inherit; color: inherit; border: 0; background: none; cursor: poi
 @keyframes wait { 50% { transform: translateY(-8px); opacity: 1; } }
 
 /* ---- launch pads ---- */
-.pads { display: flex; justify-content: center; gap: 10px; padding: 6px 10px 10px; }
+.pads { display: flex; justify-content: center; gap: 10px; padding: 6px 10px 10px; min-height: calc(var(--pad) + 16px); } /* room kept while loading: a level has 3 to 5 pads */
 .pad {
   position: relative; width: var(--pad); height: var(--pad); border-radius: 18px; flex: none;
   background: var(--glass); border: 1.5px solid var(--glass-edge);
