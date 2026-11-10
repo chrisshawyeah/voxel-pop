@@ -1,4 +1,15 @@
-// The ten sculptures, drawn in code as voxel grids. y is up, the front faces +z.
+// The sculptures, drawn in code as grids of cubes. x runs left to right, y is up, the front faces +z.
+//
+// To add your own: write a function like the ones below, add its name to MODELS at the bottom,
+// then give it a line in LEVELS (js/levels.js).
+//   const s = new Sculpt(width, height, depth);
+//   s.fill((x, y, z) => true or false, 'red')    puts cubes wherever the test is true
+//   s.paint((x, y, z, colour) => ..., 'white')   recolours cubes that are already there
+//   s.set(x, y, z, 'blue')                       one cube; s.set(x, y, z, null) removes it
+//   s.skin(x, y, z)                              true when that cube can be seen from outside
+//   return s.done();
+// Colours are the names in COLORS; add any you like. A colour buried inside another is what
+// makes a level tricky: its crew have nothing to hit until the outside is opened.
 
 export const COLORS = {
   red: '#ff4b5c', orange: '#ff9a2e', yellow: '#ffd23f', green: '#36c46f', teal: '#1fc6bd',
@@ -35,6 +46,9 @@ class Sculpt {
       if (r !== undefined) this.set(x, y, z, r);
     }
     return this;
+  }
+  skin(x, y, z) {
+    return [[1, 0, 0], [-1, 0, 0], [0, 1, 0], [0, -1, 0], [0, 0, 1], [0, 0, -1]].some(([a, b, c]) => !this.get(x + a, y + b, z + c));
   }
   fill(test, name) { return this.each((x, y, z) => (test(x, y, z) ? name : undefined)); }
   paint(test, name) { return this.each((x, y, z, cur) => (cur && test(x, y, z, cur) ? name : undefined)); }
@@ -275,4 +289,144 @@ function dolls() {
   return s.done();
 }
 
-export const MODELS = { mushroom, duck, cactus, rocket, penguin, balloon, lighthouse, robot, planet, castle, dolls };
+// ---- nine more ----
+
+function cupcake() {
+  const s = new Sculpt(13, 15, 13);
+  const { cx, cz } = s;
+  const r2 = (x, z) => sq(x - cx) + sq(z - cz);
+  // the paper cup, wider at the top, in stripes
+  s.each((x, y, z) => {
+    if (y > 5 || r2(x, z) > sq(3.6 + y * 0.35)) return undefined;
+    const a = Math.atan2(z - cz, x - cx) + Math.PI;
+    return Math.floor((a / (Math.PI * 2)) * 10) % 2 ? 'teal' : 'white';
+  });
+  s.paint((x, y, z) => y <= 5 && r2(x, z) <= sq(2.2 + y * 0.3), 'brown'); // the cake inside
+  s.fill((x, y, z) => y >= 6 && y <= 7 && r2(x, z) <= sq(5.9), 'pink'); // three rings of frosting
+  s.fill((x, y, z) => y >= 8 && y <= 9 && r2(x, z) <= sq(4.4), 'pink');
+  s.fill((x, y, z) => y >= 10 && y <= 11 && r2(x, z) <= sq(2.9), 'pink');
+  s.paint((x, y, z, cur) => cur === 'pink' && s.skin(x, y, z) && hash(x, y, z) < 0.12, 'yellow'); // sprinkles
+  s.fill((x, y, z) => sq(x - cx) + sq(y - 13) + sq(z - cz) <= sq(1.5), 'red'); // the cherry
+  return s.done();
+}
+
+function burger() {
+  const s = new Sculpt(15, 13, 15);
+  const { cx, cz } = s;
+  const r2 = (x, z) => sq(x - cx) + sq(z - cz);
+  const disc = (y0, y1, r, c) => s.fill((x, y, z) => y >= y0 && y <= y1 && r2(x, z) <= sq(r), c);
+  disc(0, 2, 6.2, 'cream'); // bottom bun
+  disc(3, 3, 7.0, 'green'); // lettuce
+  disc(4, 6, 6.4, 'brown'); // patty
+  s.fill((x, y, z) => y === 7 && Math.abs(x - cx) <= 6 && Math.abs(z - cz) <= 6, 'yellow'); // cheese, square so its corners poke out
+  disc(8, 8, 6.0, 'red'); // tomato
+  s.fill((x, y, z) => y >= 9 && sq(x - cx) / sq(6.4) + sq(y - 9) / sq(3.6) + sq(z - cz) / sq(6.4) <= 1, 'cream'); // top bun
+  s.paint((x, y, z, cur) => cur === 'cream' && y >= 10 && !s.get(x, y + 1, z) && hash(x, y, z) < 0.22, 'white'); // sesame seeds
+  return s.done();
+}
+
+function fish() {
+  const s = new Sculpt(19, 13, 9);
+  const cy = 6, cz = s.cz;
+  s.fill((x, y, z) => sq(x - 11) / sq(6.4) + sq(y - cy) / sq(4.6) + sq(z - cz) / sq(3.4) <= 1, 'orange');
+  s.paint(x => x === 8 || x === 9 || x === 13, 'white'); // stripes, right through the body
+  s.paint(x => x === 7 || x === 10 || x === 12 || x === 14, 'charcoal');
+  s.fill((x, y, z) => x <= 5 && Math.abs(z - cz) <= 0.6 && Math.abs(y - cy) <= 1 + (5 - x) * 0.9, 'orange'); // tail
+  s.paint((x, y, z) => x <= 1 && Math.abs(z - cz) <= 0.6, 'charcoal');
+  s.fill((x, y, z) => y >= 10 && y <= 12 && x >= 9 && x <= 13 - (y - 10) && Math.abs(z - cz) <= 0.6, 'orange'); // top fin
+  for (const side of [-1, 1]) {
+    s.paint((x, y, z) => sq(x - 15) + sq(y - 7) <= sq(1.1) && (z - cz) * side >= 1.5, 'white');
+    s.paint((x, y, z) => x === 15 && y === 7 && (z - cz) * side >= 1.5, 'charcoal');
+  }
+  return s.done();
+}
+
+function gift() {
+  const s = new Sculpt(11, 13, 11);
+  const { cx, cz } = s;
+  s.fill((x, y, z) => y <= 8 && x >= 1 && x <= 9 && z >= 1 && z <= 9, 'blue');
+  s.fill((x, y) => y >= 9 && y <= 10, 'purple'); // the lid, a little wider than the box
+  s.paint((x, y, z) => Math.abs(x - cx) < 0.6 || Math.abs(z - cz) < 0.6, 'yellow'); // ribbon
+  s.paint((x, y, z) => y >= 2 && y <= 7 && Math.abs(x - cx) <= 2 && Math.abs(z - cz) <= 2, 'pink'); // the present inside
+  s.paint((x, y, z) => y >= 3 && y <= 6 && Math.abs(x - cx) <= 1 && Math.abs(z - cz) <= 1, 'white');
+  for (const side of [-1, 1]) {
+    s.fill((x, y, z) => y >= 11 && y <= 12 && Math.abs(z - cz) < 0.6 && (x - cx) * side >= 1 && (x - cx) * side <= 3, 'yellow'); // bow
+  }
+  s.set(cx, 11, cz, 'yellow');
+  return s.done();
+}
+
+function tree() {
+  const s = new Sculpt(13, 22, 13);
+  const { cx, cz } = s;
+  const r2 = (x, z) => sq(x - cx) + sq(z - cz);
+  s.fill((x, y, z) => y <= 2 && r2(x, z) <= sq(1.6), 'brown');
+  for (const [y0, h, r] of [[3, 6, 6], [8, 6, 4.8], [13, 6, 3.6]]) { // three tiers, each a cone
+    s.fill((x, y, z) => y >= y0 && y < y0 + h && r2(x, z) <= sq(r * (1 - (y - y0) / h) + 0.6), 'green');
+  }
+  s.paint((x, y, z) => y >= 3 && y <= 16 && r2(x, z) <= sq(1.2), 'brown'); // the trunk runs up inside
+  s.each((x, y, z, cur) => { // baubles on the outside
+    if (cur !== 'green' || !s.skin(x, y, z)) return undefined;
+    const h = hash(x, y, z);
+    return h < 0.07 ? 'red' : h < 0.14 ? 'yellow' : h < 0.19 ? 'blue' : undefined;
+  });
+  s.fill((x, y, z) => y >= 19 && y <= 21 && Math.abs(x - cx) + Math.abs(y - 20) <= 1 && Math.abs(z - cz) < 0.6, 'yellow'); // star
+  return s.done();
+}
+
+function melon() {
+  const s = new Sculpt(15, 15, 15);
+  const c = 7;
+  s.each((x, y, z) => {
+    const d = Math.hypot(x - c, y - c, z - c);
+    if (d > 7.2) return undefined;
+    if (x > c && y > c && z > c) return undefined; // one slice is already cut out, so the inside shows
+    if (d > 6.2) return 'green';
+    if (d > 5.3) return 'white';
+    return hash(x, y, z) < 0.07 ? 'charcoal' : 'red';
+  });
+  return s.done();
+}
+
+function snowman() {
+  const s = new Sculpt(13, 23, 13);
+  const { cx, cz } = s;
+  const r2 = (x, z) => sq(x - cx) + sq(z - cz);
+  const ball = (cy, r, c) => s.fill((x, y, z) => r2(x, z) + sq(y - cy) <= sq(r), c);
+  ball(5, 5.6, 'white'); ball(12, 4.2, 'white'); ball(17, 3.1, 'white');
+  ball(5, 2.6, 'blue'); // a lump of ice in the middle
+  s.fill((x, y, z) => y === 15 && r2(x, z) <= sq(3.6), 'red'); // scarf
+  s.fill((x, y, z) => y === 13 && Math.abs(z - cz) < 0.6 && Math.abs(x - cx) >= 4, 'brown'); // stick arms
+  s.paint((x, y, z) => z >= cz + 3 && x === cx && (y === 10 || y === 12 || y === 14), 'charcoal'); // buttons
+  s.paint((x, y, z) => z >= cz + 2 && y === 18 && Math.abs(x - cx) === 1, 'charcoal'); // eyes
+  s.fill((x, y, z) => y === 17 && x === cx && z > cz + 2 && z <= cz + 5, 'orange'); // carrot nose
+  s.fill((x, y, z) => y === 20 && r2(x, z) <= sq(3.4), 'charcoal'); // hat
+  s.fill((x, y, z) => y >= 21 && y <= 22 && r2(x, z) <= sq(2.2), 'charcoal');
+  s.paint((x, y, z) => y === 21 && r2(x, z) > sq(1.2), 'red');
+  return s.done();
+}
+
+function house() {
+  const s = new Sculpt(15, 16, 13);
+  const box = (x0, x1, y0, y1, z0, z1, c) => s.fill((x, y, z) => x >= x0 && x <= x1 && y >= y0 && y <= y1 && z >= z0 && z <= z1, c);
+  box(0, 14, 0, 0, 0, 12, 'green'); // lawn
+  box(2, 12, 1, 8, 2, 10, 'cream'); // walls
+  s.fill((x, y, z) => y >= 9 && y <= 14 && x >= 1 && x <= 13 && Math.abs(z - 6) <= 5.6 - (y - 9), 'red'); // roof
+  box(7, 8, 1, 4, 10, 10, 'brown'); // door
+  for (const x0 of [4, 10]) { box(x0, x0 + 1, 5, 6, 10, 10, 'blue'); box(x0, x0 + 1, 5, 6, 2, 2, 'blue'); } // windows
+  box(10, 11, 12, 15, 3, 4, 'grey'); // chimney
+  box(4, 10, 2, 7, 4, 8, 'yellow'); // the light inside
+  return s.done();
+}
+
+function patchwork() {
+  const s = new Sculpt(9, 9, 9);
+  const names = ['red', 'yellow', 'blue', 'green', 'purple', 'orange'];
+  s.each((x, y, z) => names[(Math.floor(x / 3) + 2 * Math.floor(y / 3) + 3 * Math.floor(z / 3)) % 6]); // 27 blocks of 27 cubes
+  return s.done();
+}
+
+export const MODELS = {
+  mushroom, duck, cactus, rocket, penguin, balloon, lighthouse, robot, planet, castle, dolls,
+  cupcake, burger, fish, gift, tree, melon, snowman, house, patchwork,
+};

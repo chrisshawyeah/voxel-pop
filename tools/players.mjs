@@ -36,11 +36,11 @@ export function play(board, rand, { burst = Infinity, slots = 5 } = {}) {
   return false;
 }
 
-export function rates(board, rand, N = 60) {
+export function rates(board, rand, N = 60, slots = 5) {
   let patient = 0, hasty = 0;
   for (let k = 0; k < N; k++) {
-    patient += play(board, rand);
-    hasty += play(board, rand, { burst: 14 });
+    patient += play(board, rand, { slots });
+    hasty += play(board, rand, { burst: 14, slots });
   }
   return { patient: Math.round((100 * patient) / N), hasty: Math.round((100 * hasty) / N) };
 }

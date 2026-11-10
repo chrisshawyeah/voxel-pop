@@ -26,7 +26,7 @@ jobs:
       - name: Build the site folder
         run: |
           mkdir -p _site
-          cp -r index.html manifest.webmanifest icon-*.png css js vendor mockups _site/
+          cp -r index.html manifest.webmanifest icon-*.png css js vendor _site/
           sed -i "s/<meta name=\"build\" content=\"dev\">/<meta name=\"build\" content=\"${GITHUB_SHA::7}\">/" _site/index.html
           grep -q "content=\"${GITHUB_SHA::7}\"" _site/index.html
       - uses: actions/configure-pages@v6

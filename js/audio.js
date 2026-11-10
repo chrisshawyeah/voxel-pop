@@ -53,7 +53,6 @@ export class Sound {
   done() { this.tone(784, 0.1, { vol: 0.16 }); this.tone(1046, 0.14, { vol: 0.14, delay: 0.07 }); }
   reveal() { [1318, 1568, 2093].forEach((f, i) => this.tone(f, 0.09, { vol: 0.08, delay: i * 0.05 })); }
   nope() { this.tone(220, 0.12, { type: 'square', vol: 0.06 }); }
-  boom() { this.tone(110, 0.4, { type: 'sawtooth', vol: 0.18, slide: 0.4 }); this.tone(70, 0.5, { vol: 0.3, slide: 0.5 }); }
   win() { [523, 659, 784, 1046, 1318].forEach((f, i) => this.tone(f, 0.22, { type: 'triangle', vol: 0.2, delay: i * 0.09 })); }
   jam() { [392, 330, 262].forEach((f, i) => this.tone(f, 0.25, { type: 'triangle', vol: 0.18, delay: i * 0.14 })); }
 }
