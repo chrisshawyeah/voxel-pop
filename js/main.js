@@ -19,7 +19,7 @@ const ICONS = {
 const POWERS = [
   { id: 'bomb', name: 'Bomb', how: 'Tap the sculpture to drop the bomb', target: 'cube' },
   { id: 'pad', name: 'Extra pad', target: null },
-  { id: 'recall', name: 'Recall', how: 'Tap a crew member on a pad to send it back', target: 'pad' },
+  { id: 'recall', name: 'Recall', how: 'Tap a pad to send its crew member back to its line', target: 'pad' },
   { id: 'peek', name: 'Peek', target: null },
   { id: 'sweep', name: 'Sweep', how: 'Tap a colour on the sculpture', target: 'cube' },
 ];
@@ -327,12 +327,13 @@ function jam() {
   sound.jam(); buzz.tick(0);
   const padBtn = $('jam-pad');
   padBtn.disabled = st.slots.length >= R.MAX_SLOTS;
-  padBtn.textContent = save.stock.pad ? `Add a pad (${save.stock.pad} left)` : `Add a pad (${PRICE} coins)`;
-  $('jam-recall').textContent = save.stock.recall ? `Send one back (${save.stock.recall} left)` : `Send one back (${PRICE} coins)`;
+  padBtn.textContent = save.stock.pad ? `Extra pad (${save.stock.pad} left)` : `Extra pad (${PRICE} coins)`;
+  $('jam-recall').textContent = save.stock.recall ? `Recall one (${save.stock.recall} left)` : `Recall one (${PRICE} coins)`;
+  padEls.forEach(p => p.classList.add('stuck'));
   $('jam').hidden = false;
 }
 
-function resume() { state = 'play'; jamClock = 0; $('jam').hidden = true; }
+function resume() { state = 'play'; jamClock = 0; $('jam').hidden = true; padEls.forEach(p => p.classList.remove('stuck')); }
 
 let last = performance.now();
 function frame(now) {
