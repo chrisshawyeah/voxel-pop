@@ -74,7 +74,9 @@ export class Stage {
     this.frame();
   }
 
-  // Builds the instanced cubes for a board. Grid cell i becomes instance idOf[i].
+  // Builds the instanced cubes for the cubes still on a board (all of them at a level's start,
+  // fewer after an undo or a restore). Grid cell i becomes instance idOf[i]. The framing comes
+  // from the whole sculpture, so the camera does not move when cubes come back.
   load(board, model) {
     if (this.mesh) { this.spin.remove(this.mesh); this.mesh.dispose(); }
     this.board = board; this.model = model;
@@ -82,7 +84,10 @@ export class Stage {
     this.idOf = new Int32Array(board.cells.length).fill(-1);
     this.cellOf = [];
     this.colors = model.palette.map(h => new THREE.Color(h));
-    const mesh = new THREE.InstancedMesh(this.cubeGeo, this.cubeMat, board.total);
+    let present = 0;
+    for (let i = 0; i < board.cells.length; i++) if (board.cells[i]) present++;
+    const mesh = new THREE.InstancedMesh(this.cubeGeo, this.cubeMat, Math.max(1, present));
+    mesh.count = present;
     this.offset = new THREE.Vector3(-(sx - 1) / 2, 0.8, -(sz - 1) / 2);
     let k = 0;
     for (let i = 0; i < board.cells.length; i++) {
@@ -99,8 +104,8 @@ export class Stage {
     this.spin.add(mesh);
     // The real reach of the shape as it turns, not its grid box.
     let reach = 1, top = 1;
-    for (let i = 0; i < board.cells.length; i++) {
-      if (!board.cells[i]) continue;
+    for (let i = 0; i < model.cells.length; i++) {
+      if (!model.cells[i]) continue;
       const x = i % sx, y = Math.floor(i / sx) % sy, z = Math.floor(i / (sx * sy));
       reach = Math.max(reach, Math.hypot(x - (sx - 1) / 2, z - (sz - 1) / 2) + 0.7);
       top = Math.max(top, y + 1);
@@ -111,7 +116,17 @@ export class Stage {
     this.shadow.scale.set(rad * 2.9, rad * 2.9, 1); this.shadow.position.y = -0.32;
     this.size = { sx, sy: top, sz, rad: reach };
     this.flashes.clear();
+    this.clearChips(); // chips of cubes an undo put back would fly over them
     this.frame();
+  }
+
+  clearChips() {
+    for (let k = 0; k < CHIP_POOL; k++) {
+      if (this.chipState[k].life <= 0) continue;
+      this.chipState[k].life = 0;
+      this.chips.setMatrixAt(k, ZERO);
+    }
+    this.chips.instanceMatrix.needsUpdate = true;
   }
 
   // Fits the sculpture into the stage, whatever its shape and the screen's.
@@ -146,11 +161,21 @@ export class Stage {
     return { x: r.left + (v.x * 0.5 + 0.5) * r.width, y: r.top + (-v.y * 0.5 + 0.5) * r.height };
   }
 
-  // The cube was hit: it flashes white and swells for a moment, then bursts into chips.
+  // A shot is about to land on cube i: it turns white and swells (js/main.js starts this in the
+  // shot's last tenth of a second).
+  flash(i) {
+    const id = this.idOf[i];
+    if (id >= 0 && !this.flashes.has(id)) this.flashes.set(id, 0);
+  }
+
+  // The rules landed a shot on cube i: it goes now and bursts into chips.
   hit(i) {
     const id = this.idOf[i];
     if (id < 0) return;
-    this.flashes.set(id, 0);
+    this.mesh.setMatrixAt(id, ZERO);
+    this.mesh.instanceMatrix.needsUpdate = true;
+    this.idOf[i] = -1;
+    this.flashes.delete(id);
     this.burst(i, this.colors[this.model.cells[i] - 1], 7);
   }
 
@@ -213,24 +238,20 @@ export class Stage {
     this.spin.rotation.y = this.angle;
     this.spin.updateMatrixWorld();
     if (this.mesh && this.flashes.size) {
+      // A flash grows for 0.11 s and then holds until hit() takes the cube away.
       for (const [id, t0] of this.flashes) {
-        const t = t0 + dt;
+        if (t0 >= 0.11) continue;
+        const t = Math.min(0.11, t0 + dt);
         const i = this.cellOf[id];
-        if (t >= 0.11) {
-          this.mesh.setMatrixAt(id, ZERO);
-          this.idOf[i] = -1;
-          this.flashes.delete(id);
-        } else {
-          const s = 1 + t * 3.2;
-          this.mesh.getMatrixAt(id, tmpM);
-          tmpM.decompose(tmpV, tmpQ, tmpS);
-          tmpM.compose(tmpV, tmpQ, tmpS.set(s, s, s));
-          this.mesh.setMatrixAt(id, tmpM);
-          tmpC.copy(this.colors[this.model.cells[i] - 1]).lerp(white, Math.min(1, t * 9));
-          this.mesh.setColorAt(id, tmpC);
-          this.mesh.instanceColor.needsUpdate = true;
-          this.flashes.set(id, t);
-        }
+        const s = 1 + t * 3.2;
+        this.mesh.getMatrixAt(id, tmpM);
+        tmpM.decompose(tmpV, tmpQ, tmpS);
+        tmpM.compose(tmpV, tmpQ, tmpS.set(s, s, s));
+        this.mesh.setMatrixAt(id, tmpM);
+        tmpC.copy(this.colors[this.model.cells[i] - 1]).lerp(white, Math.min(1, t * 9));
+        this.mesh.setColorAt(id, tmpC);
+        this.mesh.instanceColor.needsUpdate = true;
+        this.flashes.set(id, t);
       }
       this.mesh.instanceMatrix.needsUpdate = true;
     }
