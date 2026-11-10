@@ -28,13 +28,14 @@ export const journeys = [
     steps: [
       { goto: "/voxel-pop/?level=1", caption: "Level 1" },
       { expect: "Level 1", caption: "Toadstool" },
+      { run: async (ctx: any) => { await tap(ctx.page, true); await ctx.page.waitForTimeout(250); await tap(ctx.page, true); await ctx.page.waitForTimeout(300); }, caption: "Two crew go up" },
       {
         caption: "Popping every cube",
         run: async (ctx: any) => {
           const end = Date.now() + 150_000;
           while (Date.now() < end) {
             const now = await state(ctx.page);
-            if (now.level !== 0) return;
+            if (now.s === "won" || now.level !== 0) return;
             if (now.s === "jam") throw new Error("level 1 ran out of room with a careful player");
             await tap(ctx.page, true);
             await ctx.page.waitForTimeout(350);
@@ -57,7 +58,7 @@ export const journeys = [
       { click: "#prev", caption: "Back one" },
       { click: "#prev", caption: "Back again" },
       { expect: "Level 2", caption: "Level 2", highlight: true },
-      { run: async (ctx: any) => { await tap(ctx.page, true); await ctx.page.waitForTimeout(1500); }, caption: "One crew goes up" },
+      { run: async (ctx: any) => { await tap(ctx.page, true); await ctx.page.waitForTimeout(300); }, caption: "One crew goes up" },
       { click: "#again", caption: "Start it again" },
       {
         caption: "Fresh level",

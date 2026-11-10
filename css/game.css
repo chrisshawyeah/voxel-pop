@@ -32,9 +32,13 @@ button { font: inherit; color: inherit; border: 0; background: none; cursor: poi
 }
 .nav svg { width: 26px; height: 26px; fill: none; stroke: var(--ink); stroke-width: 3; stroke-linecap: round; stroke-linejoin: round; }
 .nav:active, .title:active { transform: translateY(2px); }
-.title { text-align: center; min-height: 48px; border-radius: 16px; }
+.title {
+  justify-self: center; text-align: center; min-height: 52px; padding: 2px 18px 4px; border-radius: 16px;
+  background: var(--glass); border: 1.5px solid var(--glass-edge);
+}
 .title h1 { margin: 0; font-size: 24px; font-weight: 900; letter-spacing: 0.3px; line-height: 1.15; }
-.title span { display: block; font-size: 15px; font-weight: 800; color: var(--ink-soft); }
+.title .sub { display: flex; justify-content: center; align-items: center; gap: 6px; min-height: 20px; font-size: 15px; font-weight: 800; color: var(--ink-soft); }
+.title .redo { width: 15px; height: 15px; fill: none; stroke: var(--ink-soft); stroke-width: 3; stroke-linecap: round; stroke-linejoin: round; }
 
 /* ---- 3D stage ---- */
 .stage { position: relative; flex: 1; min-height: 200px; touch-action: none; }
@@ -42,8 +46,16 @@ button { font: inherit; color: inherit; border: 0; background: none; cursor: poi
 .banner {
   position: absolute; left: 50%; bottom: 10px; transform: translateX(-50%); white-space: nowrap;
   padding: 10px 16px; border-radius: 16px; background: rgba(31, 37, 71, 0.86); color: #fff;
-  font-weight: 800; font-size: 16px; pointer-events: none;
+  font-weight: 800; font-size: 18px; pointer-events: none;
 }
+/* shown until the game's scripts have built the first level */
+.loading { position: absolute; inset: 0; display: grid; place-content: center; justify-items: center; gap: 14px; color: var(--ink-soft); font-size: 17px; }
+.loading[hidden] { display: none; }
+.loading .cubes { display: flex; gap: 8px; }
+.loading i { width: 22px; height: 22px; border-radius: 6px; background: #fff; opacity: 0.5; animation: wait 0.9s ease-in-out infinite; }
+.loading i:nth-child(2) { animation-delay: 0.15s; }
+.loading i:nth-child(3) { animation-delay: 0.3s; }
+@keyframes wait { 50% { transform: translateY(-8px); opacity: 1; } }
 
 /* ---- launch pads ---- */
 .pads { display: flex; justify-content: center; gap: 10px; padding: 6px 10px 10px; }
@@ -93,14 +105,14 @@ button { font: inherit; color: inherit; border: 0; background: none; cursor: poi
 
 /* ---- queues ---- */
 .queues {
-  display: flex; justify-content: center; gap: 12px; height: 156px; padding: 4px 10px 0; overflow: hidden;
+  display: flex; justify-content: center; gap: 12px; height: 182px; padding: 4px 10px 0; overflow: hidden;
   margin-bottom: calc(10px + env(safe-area-inset-bottom));
 }
 .col { position: relative; width: var(--crew); }
 .col .slot { position: absolute; left: 0; padding: 0; transition: transform 0.25s cubic-bezier(.2, .9, .3, 1.2); }
 .col .s1 { top: 0; z-index: 3; }
-.col .s2 { top: 60px; z-index: 2; opacity: 0.8; }
-.col .s3 { top: 120px; z-index: 1; opacity: 0.55; }
+.col .s2 { top: 60px; z-index: 2; opacity: 0.92; }
+.col .s3 { top: 120px; z-index: 1; opacity: 0.7; }
 .col .front::before { content: ""; position: absolute; inset: -4px -6px -8px; border-radius: 18px; } /* a bigger place to tap */
 .col .front:active .crew { transform: scale(0.94); }
 .col.empty::after {
@@ -115,10 +127,11 @@ button { font: inherit; color: inherit; border: 0; background: none; cursor: poi
 
 @media (max-height: 700px) {
   :root { --pad: 50px; --crew: 48px; }
-  .queues { height: 132px; }
+  .queues { height: 162px; }
   .col .s2 { top: 54px; }
   .col .s3 { top: 108px; }
 }
 @media (prefers-reduced-motion: reduce) {
   .col .slot { transition: none; }
+  .loading i { animation: none; }
 }

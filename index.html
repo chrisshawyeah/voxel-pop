@@ -34,16 +34,25 @@
   <header class="top">
     <button class="nav" id="prev" aria-label="Previous level"><svg viewBox="0 0 24 24"><path d="M15 5 8 12l7 7"/></svg></button>
     <button class="title" id="again" aria-label="Restart this level">
-      <h1 id="level-name">Level 1</h1>
-      <span id="level-sub"></span>
+      <h1 id="level-name">&nbsp;</h1>
+      <span class="sub"><span id="level-sub">&nbsp;</span><svg class="redo" viewBox="0 0 24 24" aria-hidden="true"><path d="M20 12a8 8 0 1 1-2.6-5.9"/><path d="M20 4v5h-5"/></svg></span>
     </button>
     <button class="nav" id="next" aria-label="Next level"><svg viewBox="0 0 24 24"><path d="m9 5 7 7-7 7"/></svg></button>
   </header>
+  <script>
+    // The right level number from the first paint, before the game's scripts arrive.
+    (function () {
+      var n = Number(new URLSearchParams(location.search).get('level'));
+      try { if (!(n >= 1)) n = (Number(localStorage.getItem('crumble-crew.level')) || 0) + 1; } catch (e) { n = 1; }
+      document.getElementById('level-name').textContent = 'Level ' + n;
+    })();
+  </script>
   <main class="stage" id="stage">
     <canvas id="gl"></canvas>
+    <div class="loading" id="loading"><span class="cubes"><i></i><i></i><i></i></span><b>Building the level</b></div>
     <div class="banner" id="banner" hidden></div>
   </main>
-  <section class="pads" id="pads" aria-label="Launch pads"></section>
+  <section class="pads" id="pads" aria-label="Launch pads"><div class="pad"></div><div class="pad"></div><div class="pad"></div><div class="pad"></div><div class="pad"></div></section>
   <section class="queues" id="queues" aria-label="Your crew"></section>
 </div>
 <canvas id="fx"></canvas>
