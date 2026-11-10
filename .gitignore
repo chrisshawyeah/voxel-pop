@@ -1,6 +1,7 @@
-RESEARCH.md
-PLAN-*.md
-node_modules/
+BRIEF.txt
 dist/
 .DS_Store
-BRIEF.txt
+node_modules/
+PLAN-*.md
+refs/
+RESEARCH.md
