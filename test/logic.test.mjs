@@ -1,8 +1,8 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { makeBoard, cloneBoard, removeCube, deploy, fire, step, settle, launch, target, isJammed, isWon, canFire, canReach, purgeCleared, isExposed, FLIGHT } from '../js/logic.js';
-import { LEVELS, buildLevel, dealLevel } from '../js/levels.js';
-import { plan, greedyCheck, GREEDY_PLAYS } from '../tools/players.mjs';
+import { makeBoard, cloneBoard, removeCube, deploy, fire, step, settle, launch, target, isJammed, isWon, canFire, canReach, purgeCleared, isExposed, FLIGHT, tickGame, advance, forecast, busy, Attempt } from '../js/logic.js';
+import { LEVELS, buildLevel, dealLevel, rng } from '../js/levels.js';
+import { plan, greedyCheck, hastyCheck, lineHolds, playLine, GAPS, LAND, GREEDY_PLAYS } from '../tools/players.mjs';
 
 const at = (m, x, y, z) => x + m.sx * (y + m.sy * z);
 const solid = (n, color = 1) => ({ sx: n, sy: n, sz: n, cells: new Uint8Array(n * n * n).fill(color), palette: ['#f00', '#0f0', '#00f'] });
@@ -166,10 +166,138 @@ test('the planning player treats a "?" as unknown until it reaches the front', (
   assert.equal(plan(deal(true)).win, false);
 });
 
-// Levels whose greedy rate cannot reach its band with any setting tried; the test prints the miss.
-const OUT_OF_BAND = {
-  6: 'Fish is three upright colour slabs, so every colour is always on top somewhere and a crew member digs straight down its own colour; no crew size, line count or order tried (30-50 to 80-120, 3-5 lines) made a greedy player lose',
-};
+// The front of line ci sent now with the game's landing pause, and nothing sent after it, played
+// through the game's own send (Attempt) and tick: what really happens to that crew member.
+function sendAndWatch(st, ci) {
+  const a = new Attempt(cloneBoard(st));
+  const d = a.send(ci, LAND);
+  if (!d) return null;
+  const id = d.shooter.id;
+  for (;;) {
+    const s = a.board.slots.find(x => x && x.id === id);
+    if (!s) return { finishes: true, left: 0 };
+    if (!busy(a.board)) return { finishes: false, left: s.count };
+    tickGame(a.board);
+  }
+}
+
+test('undo takes back the last send: cubes, lines, pads, shots in the air and the clock', () => {
+  const L = buildLevel(7);
+  const a = new Attempt(L.board);
+  assert.equal(a.canUndo, false, 'nothing to undo at the start');
+  const before = [];
+  for (const ci of [0, 1, 2, 3, 0]) {
+    for (let t = 0; t < 12; t++) tickGame(a.board); // sends overlap: shots are in the air
+    before.push(cloneBoard(a.board));
+    assert.ok(a.send(ci, LAND));
+  }
+  for (let t = 0; t < 40; t++) tickGame(a.board);
+  assert.ok(a.board.flying.length || a.board.cleared, 'the board moved on after the last send');
+  for (let k = before.length - 1; k >= 0; k--) {
+    assert.equal(a.undo(), true);
+    const b = before[k];
+    assert.deepEqual([a.board.tick, a.board.cleared, a.board.h1, a.board.h2], [b.tick, b.cleared, b.h1, b.h2]);
+    assert.deepEqual(a.board.cells, b.cells);
+    assert.deepEqual(a.board.columns, b.columns, 'the crew back at the front of its line');
+    assert.deepEqual(a.board.slots, b.slots, 'the pads as they were');
+    assert.deepEqual(a.board.flying, b.flying, 'the shots that were in the air');
+    assert.deepEqual(a.board.exposed.map(s => [...s].sort()), b.exposed.map(s => [...s].sort()));
+  }
+  assert.equal(a.canUndo, false);
+  assert.equal(a.undo(), false);
+  assert.deepEqual(a.board.columns, buildLevel(7).board.columns, 'back to the start of the level');
+});
+
+test('an attempt comes back from its sends alone, undo stack and all', () => {
+  const L = buildLevel(18);
+  const a = new Attempt(cloneBoard(L.board));
+  const rand = rng(4);
+  let after = null; // the board just after the last send
+  for (let k = 0; k < 6; k++) {
+    const gap = Math.floor(rand() * 30);
+    for (let t = 0; t < gap; t++) tickGame(a.board);
+    const lines = a.board.columns.map((c, i) => i).filter(i => a.board.columns[i].length);
+    if (a.send(lines[Math.floor(rand() * lines.length)], LAND)) after = cloneBoard(a.board);
+  }
+  assert.ok(a.sends.length >= 3);
+  const back = Attempt.replay(L.board, JSON.parse(JSON.stringify(a.sends)), LAND);
+  assert.ok(back);
+  assert.deepEqual(back.sends, a.sends);
+  assert.deepEqual([back.board.tick, back.board.h1, back.board.h2], [after.tick, after.h1, after.h2]);
+  assert.deepEqual(back.board.columns, after.columns);
+  assert.deepEqual(back.board.slots, after.slots);
+  assert.deepEqual(back.board.flying, after.flying);
+  assert.equal(back.before.length, a.before.length);
+  back.undo(); a.undo();
+  assert.deepEqual([back.board.tick, back.board.h1, back.board.columns], [a.board.tick, a.board.h1, a.board.columns]);
+  assert.equal(Attempt.replay(L.board, [[0, 5], [1, 2]], LAND), null, 'sends out of order do not fit');
+  assert.equal(Attempt.replay(L.board, [['x', 1]], LAND), null, 'nor does a broken save');
+  // A quiet board skips the clock ahead in one go and comes out the same as ticking.
+  const q = cloneBoard(L.board), r = cloneBoard(L.board);
+  advance(q, 500);
+  for (let t = 0; t < 500; t++) tickGame(r);
+  assert.deepEqual([q.tick, q.h1, q.cleared], [r.tick, r.h1, r.cleared]);
+});
+
+test('the finishes-or-parks forecast says what really happens when that crew member is sent', () => {
+  let checked = 0, parks = 0;
+  for (const n of [3, 7, 12, 14, 17, 18, 19]) {
+    const L = buildLevel(n);
+    const st = cloneBoard(L.board);
+    const rand = rng(n);
+    for (let t = 0; t < 4000 && !isWon(st) && !isJammed(st); t++) {
+      if (t % 7 === 0) {
+        st.columns.forEach((c, ci) => {
+          if (!c.length) return;
+          const f = forecast(st, ci, LAND);
+          assert.deepEqual(f, sendAndWatch(st, ci), `level ${n + 1}, tick ${st.tick}, line ${ci + 1}`);
+          if (f) { checked++; parks += !f.finishes; }
+        });
+      }
+      if (t % 5 === 0) {
+        const open = st.columns.map((c, i) => i).filter(i => st.columns[i].length && st.exposed[st.columns[i][0].color].size);
+        if (open.length) deploy(st, open[Math.floor(rand() * open.length)], LAND);
+      }
+      tickGame(st);
+    }
+  }
+  assert.ok(checked > 200 && parks > 20, `${checked} forecasts checked, ${parks} of them parks`);
+});
+
+test('level 19: the forecast warns that blue crew sent together park, and undo gets out of the jam', () => {
+  const L = buildLevel(18);
+  const blue = L.model.names.indexOf('blue');
+  const lines = L.board.columns.map((c, i) => i).filter(i => L.board.columns[i][0]?.color === blue);
+  assert.equal(lines.length, 3, 'blue at the front of three lines, all ready');
+  assert.equal(L.board.slots.length, 3);
+  const a = new Attempt(L.board);
+  const count = a.board.columns[lines[0]][0].count;
+  assert.deepEqual(forecast(a.board, lines[0], LAND), { finishes: false, left: count - 27 }, 'the first blue fires its 27 open cubes and parks');
+  a.send(lines[0], LAND);
+  for (let t = 0; t < 5; t++) tickGame(a.board); // 150 ms later
+  assert.equal(forecast(a.board, lines[1], LAND).finishes, false, 'a second blue now parks too');
+  a.send(lines[1], LAND);
+  for (let t = 0; t < 5; t++) tickGame(a.board);
+  const third = cloneBoard(a.board);
+  a.send(lines[2], LAND);
+  for (let t = 0; t < 400 && !isJammed(a.board); t++) tickGame(a.board);
+  assert.equal(isJammed(a.board), true, 'three blue on three pads: out of room');
+  assert.equal(a.board.cleared, 27);
+  a.undo();
+  assert.equal(isJammed(a.board), false, 'undo frees the third pad');
+  assert.deepEqual([a.board.tick, a.board.h1, a.board.columns], [third.tick, third.h1, third.columns]);
+});
+
+test('playLine sends a line with the sends overlapping in time, and says when it loses', () => {
+  // A red cube on each of two green ones. Red first wins whatever the gap between sends; green
+  // first on a board with one pad parks green on it, and that is out of room.
+  const st = makeBoard({ sx: 2, sy: 2, sz: 1, cells: Uint8Array.from([2, 2, 1, 1]), palette: ['#f00', '#0f0'] });
+  st.slots = [null, null];
+  st.columns = [[crew(0, 0, 1), crew(1, 0, 1)], [crew(2, 1, 2)]];
+  for (const gap of GAPS) assert.equal(playLine(st, [0, 0, 1], gap), true, `gap ${gap}`);
+  st.slots = [null];
+  assert.equal(playLine(st, [1, 0, 0], 0), false);
+});
 
 for (let n = 0; n < LEVELS.length; n++) {
   const def = LEVELS[n];
@@ -186,23 +314,21 @@ for (let n = 0; n < LEVELS.length; n++) {
       col.forEach((s, k) => { if (s.hidden) { hidden++; assert.equal(col[k - 1].hidden, false, 'never two "?" in a row'); } });
     }
     assert.equal(hidden, def.hidden || 0);
-    const p = plan(L.board);
+    const p = plan(L.board, { holds: line => lineHolds(L.board, line) });
     assert.equal(p.win, true, `the planning player ${p.win === null ? 'gave up' : 'lost'} after ${p.boards} boards`);
-    // Its line, played with the game's own ticks, wins.
+    // Its line, played with the game's own ticks, wins: waiting for the pads to stop before each
+    // send, and with the sends 0, 150, 300 and 600 ms apart while shots are still in the air.
     const st = cloneBoard(L.board);
     for (const ci of p.line) { settle(st); assert.ok(deploy(st, ci), 'the line sends into a free pad'); }
     settle(st);
     assert.equal(isWon(st), true);
+    for (const gap of GAPS) assert.equal(playLine(L.board, p.line, gap), true, `the winning line loses with sends ${Math.round(gap * 1000 / 30)} ms apart`);
+    assert.equal(p.holds, true);
     const rate = greedyCheck(L.board);
+    const hasty = hastyCheck(L.board);
     const [lo, hi] = def.greedy;
-    const inBand = rate >= lo && rate <= hi;
-    console.log(`  L${n + 1} ${def.name}: ${L.board.total} cubes, ${L.shooters} crew, ${def.pads} pads, ${hidden} hidden, plan wins in ${p.boards} boards, greedy ${rate}% of ${GREEDY_PLAYS} (band ${lo}-${hi}%)${inBand ? '' : ' MISS'}`);
-    if (OUT_OF_BAND[n + 1]) {
-      if (inBand) assert.fail(`level ${n + 1} is in its band now; take it off OUT_OF_BAND`);
-      console.log(`    MISS, known: ${OUT_OF_BAND[n + 1]}`);
-    } else {
-      assert.ok(inBand, `greedy wins ${rate}%, outside ${lo}-${hi}%`);
-    }
-    if (n >= 3 && !OUT_OF_BAND[n + 1]) assert.ok(rate < 100, 'after level 3 a greedy player must lose sometimes');
+    console.log(`  L${n + 1} ${def.name}: ${L.board.total} cubes, ${L.shooters} crew, ${def.pads} pads, ${hidden} hidden, plan wins in ${p.boards} boards, greedy ${rate}% hasty ${hasty}% of ${GREEDY_PLAYS} (band ${lo}-${hi}%)`);
+    assert.ok(rate >= lo && rate <= hi, `greedy wins ${rate}%, outside ${lo}-${hi}%`);
+    if (n >= 3) assert.ok(rate < 100, 'after level 3 a greedy player must lose sometimes');
   });
 }

@@ -333,8 +333,11 @@ function fish() {
   const s = new Sculpt(19, 13, 9);
   const cy = 6, cz = s.cz;
   s.fill((x, y, z) => sq(x - 11) / sq(6.4) + sq(y - cy) / sq(4.6) + sq(z - cz) / sq(3.4) <= 1, 'orange');
-  s.paint(x => x === 8 || x === 9 || x === 13, 'white'); // stripes, right through the body
-  s.paint(x => x === 7 || x === 10 || x === 12 || x === 14, 'charcoal');
+  // Flat bands across the body, so each colour sits under another: orange on top, a white band,
+  // orange, a charcoal band, orange underneath. (Upright stripes let every colour dig straight
+  // down itself, and nobody ever had to wait.)
+  s.paint((x, y) => y === 8, 'white');
+  s.paint((x, y) => y === 5, 'charcoal');
   s.fill((x, y, z) => x <= 5 && Math.abs(z - cz) <= 0.6 && Math.abs(y - cy) <= 1 + (5 - x) * 0.9, 'orange'); // tail
   s.paint((x, y, z) => x <= 1 && Math.abs(z - cz) <= 0.6, 'charcoal');
   s.fill((x, y, z) => y >= 10 && y <= 12 && x >= 9 && x <= 13 - (y - 10) && Math.abs(z - cz) <= 0.6, 'orange'); // top fin
