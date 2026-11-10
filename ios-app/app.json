@@ -1,0 +1,22 @@
+{
+  "expo": {
+    "name": "Crumble Crew",
+    "slug": "crumble-crew",
+    "version": "1.0.0",
+    "orientation": "portrait",
+    "icon": "./assets/icon.png",
+    "userInterfaceStyle": "light",
+    "backgroundColor": "#a9d6ff",
+    "ios": {
+      "bundleIdentifier": "com.everdonestudio.crumblecrew",
+      "buildNumber": "1",
+      "supportsTablet": false,
+      "infoPlist": {
+        "ITSAppUsesNonExemptEncryption": false
+      }
+    },
+    "plugins": [
+      "expo-status-bar"
+    ]
+  }
+}

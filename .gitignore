@@ -6,3 +6,8 @@ PLAN-*.md
 refs/
 RESEARCH.md
 verify/out/
+ios-app/build/
+ios-app/signing.env
+ios-app/node_modules/
+ios-app/ios/
+verify/perf-report.json

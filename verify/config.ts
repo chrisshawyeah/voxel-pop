@@ -6,6 +6,8 @@ const config: VerifyConfig = {
   transitionHoldMs: 1000,
   app: { name: "Crumble Crew", kind: "casual 3D cube-popping puzzle game, levels only, no menus" },
   viewport: { width: 1280, height: 800 },
+  // The game is WebGL: without the graphics card a headless browser draws one frame every few seconds.
+  browser: { args: ["--use-angle=metal", "--enable-gpu", "--ignore-gpu-blocklist"] },
   quality: {
     pages: ["/voxel-pop/", "/voxel-pop/?level=19"],
     crawl: false,
