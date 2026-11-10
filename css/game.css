@@ -58,7 +58,7 @@ button { font: inherit; color: inherit; border: 0; background: none; cursor: poi
 
 /* ---- crew ---- */
 .crew {
-  position: relative; width: var(--crew); height: calc(var(--crew) + 4px); flex: none; pointer-events: none;
+  display: block; position: relative; width: var(--crew); height: calc(var(--crew) + 4px); flex: none; pointer-events: none;
 }
 .crew .body {
   position: absolute; inset: 0; border-radius: 42% 42% 36% 36% / 46% 46% 34% 34%;
@@ -97,14 +97,12 @@ button { font: inherit; color: inherit; border: 0; background: none; cursor: poi
   margin-bottom: calc(10px + env(safe-area-inset-bottom));
 }
 .col { position: relative; width: var(--crew); }
-.col .slot { position: absolute; left: 0; transition: transform 0.25s cubic-bezier(.2, .9, .3, 1.2); }
-.col .slot:nth-of-type(1) { top: 0; z-index: 3; }
-.col .slot:nth-of-type(2) { top: 60px; z-index: 2; opacity: 0.8; }
-.col .slot:nth-of-type(3) { top: 120px; z-index: 1; opacity: 0.55; }
-.col button.front {
-  position: absolute; left: -6px; top: -4px; width: calc(var(--crew) + 12px); height: 70px; z-index: 5; border-radius: 18px;
-}
-.col button.front:active + .slot .crew { transform: scale(0.94); }
+.col .slot { position: absolute; left: 0; padding: 0; transition: transform 0.25s cubic-bezier(.2, .9, .3, 1.2); }
+.col .s1 { top: 0; z-index: 3; }
+.col .s2 { top: 60px; z-index: 2; opacity: 0.8; }
+.col .s3 { top: 120px; z-index: 1; opacity: 0.55; }
+.col .front::before { content: ""; position: absolute; inset: -4px -6px -8px; border-radius: 18px; } /* a bigger place to tap */
+.col .front:active .crew { transform: scale(0.94); }
 .col.empty::after {
   content: ""; position: absolute; left: 50%; top: 18px; width: 18px; height: 18px; transform: translateX(-50%);
   border-radius: 50%; background: rgba(255, 255, 255, 0.5);
@@ -118,8 +116,8 @@ button { font: inherit; color: inherit; border: 0; background: none; cursor: poi
 @media (max-height: 700px) {
   :root { --pad: 50px; --crew: 48px; }
   .queues { height: 132px; }
-  .col .slot:nth-of-type(2) { top: 54px; }
-  .col .slot:nth-of-type(3) { top: 108px; }
+  .col .s2 { top: 54px; }
+  .col .s3 { top: 108px; }
 }
 @media (prefers-reduced-motion: reduce) {
   .col .slot { transition: none; }

@@ -45,10 +45,10 @@ function start(n) {
 
 // ---------- crew ----------
 function crewEl(s) {
-  const el = document.createElement('div');
+  const el = document.createElement('span');
   el.className = 'crew' + (s.hidden ? ' egg' : '');
   if (!s.hidden) el.style.setProperty('--c', st.palette[s.color]);
-  el.innerHTML = `<div class="body"><span class="eyes"><i></i><i></i></span><b class="n">${s.hidden ? '?' : s.count}</b></div>`;
+  el.innerHTML = `<span class="body"><span class="eyes"><i></i><i></i></span><b class="n">${s.hidden ? '?' : s.count}</b></span>`;
   return el;
 }
 
@@ -58,16 +58,14 @@ function renderQueues() {
   st.columns.forEach((col, ci) => {
     const c = document.createElement('div');
     c.className = 'col' + (col.length ? '' : ' empty');
-    if (col.length) {
-      const b = document.createElement('button');
-      b.className = 'front';
-      b.setAttribute('aria-label', col[0].hidden ? 'Hidden crew member' : `Send ${col[0].count}`);
-      b.addEventListener('pointerdown', e => { e.preventDefault(); onSend(ci); });
-      c.appendChild(b);
-    }
-    col.slice(0, 3).forEach(s => {
-      const slot = document.createElement('div');
-      slot.className = 'slot';
+    // The front crew member is the button; the two behind it only show what comes next.
+    col.slice(0, 3).forEach((s, k) => {
+      const slot = document.createElement(k ? 'div' : 'button');
+      slot.className = `slot s${k + 1}` + (k ? '' : ' front');
+      if (!k) {
+        slot.setAttribute('aria-label', s.hidden ? 'Send the hidden crew member' : `Send ${s.count}`);
+        slot.addEventListener('pointerdown', e => { e.preventDefault(); onSend(ci); });
+      }
       slot.appendChild(crewEl(s));
       c.appendChild(slot);
     });
