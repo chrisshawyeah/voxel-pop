@@ -1,0 +1,6 @@
+RESEARCH.md
+PLAN-*.md
+node_modules/
+dist/
+.DS_Store
+BRIEF.txt
