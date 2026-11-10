@@ -10,7 +10,7 @@
 <meta name="mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-status-bar-style" content="default">
 <meta name="apple-mobile-web-app-title" content="Crumble Crew">
-<meta name="description" content="Crumble Crew: send your crew up to pop cube sculptures, one colour at a time.">
+<meta name="description" content="Crumble Crew: send your crew up to pop cube sculptures, one colour at a time. Levels only.">
 <title>Crumble Crew</title>
 <link rel="manifest" href="manifest.webmanifest">
 <link rel="icon" href="icon-192.png">
@@ -22,14 +22,12 @@
 <body>
 <div id="app">
   <header class="top">
-    <div class="coins" id="coins" aria-label="Coins"><span class="coin"></span><b id="coin-count">0</b></div>
-    <div class="title">
+    <button class="nav" id="prev" aria-label="Previous level"><svg viewBox="0 0 24 24"><path d="M15 5 8 12l7 7"/></svg></button>
+    <button class="title" id="again" aria-label="Restart this level">
       <h1 id="level-name">Level 1</h1>
-      <div class="strip" id="strip"></div>
-    </div>
-    <button class="gear" id="gear" aria-label="Settings">
-      <svg viewBox="0 0 24 24"><path d="M12 15.5a3.5 3.5 0 1 1 0-7 3.5 3.5 0 0 1 0 7Zm7.43-2.53c.04-.32.07-.64.07-.97s-.03-.66-.07-.98l2.11-1.65a.5.5 0 0 0 .12-.64l-2-3.46a.5.5 0 0 0-.61-.22l-2.49 1a7.3 7.3 0 0 0-1.69-.98l-.38-2.65A.49.49 0 0 0 14 2h-4a.49.49 0 0 0-.49.42l-.38 2.65c-.61.25-1.17.58-1.69.98l-2.49-1a.5.5 0 0 0-.61.22l-2 3.46a.49.49 0 0 0 .12.64l2.11 1.65c-.04.32-.07.65-.07.98s.03.65.07.97l-2.11 1.65a.5.5 0 0 0-.12.64l2 3.46c.12.22.39.3.61.22l2.49-1c.52.4 1.08.73 1.69.98l.38 2.65c.03.24.24.42.49.42h4c.25 0 .46-.18.49-.42l.38-2.65c.61-.25 1.17-.58 1.69-.98l2.49 1c.23.09.49 0 .61-.22l2-3.46a.5.5 0 0 0-.12-.64l-2.11-1.65Z"/></svg>
+      <span id="level-sub"></span>
     </button>
+    <button class="nav" id="next" aria-label="Next level"><svg viewBox="0 0 24 24"><path d="m9 5 7 7-7 7"/></svg></button>
   </header>
   <main class="stage" id="stage">
     <canvas id="gl"></canvas>
@@ -37,41 +35,8 @@
   </main>
   <section class="pads" id="pads" aria-label="Launch pads"></section>
   <section class="queues" id="queues" aria-label="Your crew"></section>
-  <nav class="tray" id="tray" aria-label="Power-ups"></nav>
 </div>
 <canvas id="fx"></canvas>
-
-<div class="sheet" id="win" hidden>
-  <div class="card">
-    <img class="thumb-big" id="win-thumb" alt="">
-    <h2 id="win-title">Popped!</h2>
-    <p class="earn"><span class="coin"></span><b id="win-coins">+60</b></p>
-    <button class="big" id="win-next">Next level</button>
-  </div>
-</div>
-
-<div class="sheet top" id="jam" hidden>
-  <div class="card">
-    <h2>Out of room!</h2>
-    <p>Every pad is full, and none of their colours can be reached yet.</p>
-    <button class="big" id="jam-pad">Extra pad</button>
-    <button class="big alt" id="jam-recall">Recall one</button>
-    <button class="plain" id="jam-retry">Try the level again</button>
-  </div>
-</div>
-
-<div class="sheet" id="settings" hidden>
-  <div class="card">
-    <h2>Settings</h2>
-    <label class="row"><span>Sound</span><input type="checkbox" id="opt-sound" switch></label>
-    <label class="row"><span>Vibration</span><input type="checkbox" id="opt-vibe" switch></label>
-    <h3>Levels</h3>
-    <div class="levels" id="level-grid"></div>
-    <button class="big alt" id="restart">Restart this level</button>
-    <button class="plain" id="reset">Start over from level 1</button>
-    <button class="big" id="close-settings">Back to the game</button>
-  </div>
-</div>
 
 <label id="haptic" aria-hidden="true"><input type="checkbox" switch tabindex="-1"></label>
 <script type="module" src="js/main.js"></script>

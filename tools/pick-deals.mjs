@@ -1,7 +1,7 @@
 // For each level, tries deals at several flip values and prints the one whose hasty win
-// rate is closest to the level's target, among deals the solver wins with 5 pads and a
+// rate is closest to the level's target, among deals the solver wins with the level's pads and a
 // patient player wins at least 90% of the time. Copy deal and flip into LEVELS.
-import { LEVELS, dealLevel, rng } from '../js/levels.js';
+import { LEVELS, dealLevel, rng, padsFor } from '../js/levels.js';
 import { solve } from '../js/logic.js';
 import { rates } from './players.mjs';
 
@@ -11,8 +11,8 @@ for (const n of only) {
   let best = null;
   for (const mix of [0.25, 0.5, 1]) for (const flip of flips) for (let d = 0; d < (process.argv[3] ? Number(process.argv[3]) : 6); d++) {
     const L = dealLevel(n, d, flip, mix);
-    if (!solve(L.board, s => s.rank, 5)) continue;
-    const r = rates(L.board, rng(99 + d), 40);
+    if (!solve(L.board, s => s.rank, padsFor(L.def))) continue;
+    const r = rates(L.board, rng(99 + d), 40, padsFor(L.def));
     if (r.patient < 85) continue;
     const score = Math.abs(r.hasty - L.def.target);
     if (!best || score < best.score) best = { d, flip, mix, score, ...r };

@@ -4,8 +4,7 @@
 // some row, column or depth line seen from one of the six sides. Removing a cube opens its
 // lines to the cube behind it, which digs tunnels rather than craters.
 
-export const START_SLOTS = 5;
-export const MAX_SLOTS = 6;
+export const START_SLOTS = 5; // launch pads, unless the level says otherwise (pads: in levels.js)
 
 export const coords = (st, i) => [i % st.sx, Math.floor(i / st.sx) % st.sy, Math.floor(i / (st.sx * st.sy))];
 export const index = (st, x, y, z) => x + st.sx * (y + st.sy * z);
@@ -184,51 +183,6 @@ export function isJammed(st) {
   }
   const anyQueued = st.columns.some(c => c.length);
   return freeSlot(st) < 0 || !anyQueued;
-}
-
-// ---- power-ups ----
-
-// Removes every cube within `r` of cube `center`. Returns the removed cell indices.
-export function blast(st, center, r) {
-  const [cx, cy, cz] = coords(st, center);
-  const out = [];
-  const R = Math.ceil(r);
-  for (let z = cz - R; z <= cz + R; z++) for (let y = cy - R; y <= cy + R; y++) for (let x = cx - R; x <= cx + R; x++) {
-    if (x < 0 || y < 0 || z < 0 || x >= st.sx || y >= st.sy || z >= st.sz) continue;
-    if ((x - cx) ** 2 + (y - cy) ** 2 + (z - cz) ** 2 > r * r) continue;
-    const i = index(st, x, y, z);
-    if (st.cells[i]) { removeCube(st, i); out.push(i); }
-  }
-  return out;
-}
-
-// Removes every cube of one colour that is exposed right now.
-export function sweep(st, color) {
-  const out = [...st.exposed[color]];
-  for (const i of out) removeCube(st, i);
-  return out;
-}
-
-export function addSlot(st) {
-  if (st.slots.length >= MAX_SLOTS) return false;
-  st.slots.push(null);
-  return true;
-}
-
-// Sends a slot's shooter back to the front of the column it came from.
-export function recall(st, slot) {
-  const s = st.slots[slot];
-  if (!s || s.leaving) return null;
-  st.slots[slot] = null;
-  const col = Math.min(s.home, st.columns.length - 1);
-  st.columns[col].unshift(s);
-  return { col, shooter: s };
-}
-
-export function revealAll(st) {
-  const out = [];
-  for (const col of st.columns) for (const s of col) if (s.hidden) { s.hidden = false; out.push(s); }
-  return out;
 }
 
 // Plays a level to the end with a simple strategy, so the generator can check it is winnable.

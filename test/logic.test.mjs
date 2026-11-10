@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { makeBoard, removeCube, deploy, fire, isJammed, isWon, canFire, purgeCleared, blast, recall, addSlot } from '../js/logic.js';
+import { makeBoard, removeCube, deploy, fire, isJammed, isWon, canFire, purgeCleared } from '../js/logic.js';
 import { LEVELS, buildLevel } from '../js/levels.js';
 
 const solid = (n, color = 1) => ({ sx: n, sy: n, sz: n, cells: new Uint8Array(n * n * n).fill(color), palette: ['#f00', '#0f0'] });
@@ -38,25 +38,24 @@ test('deploy, fire, jam and win', () => {
   assert.equal(isWon(st), true);
 });
 
-test('full pads with nothing to hit is a jam; an extra pad or a recall frees it', () => {
+test('full pads with nothing to hit is a jam', () => {
   const m = solid(3);
   m.cells[13] = 2; // buried centre of another colour
   const st = makeBoard(m);
   st.columns = [Array.from({ length: 6 }, (_, k) => ({ id: k, color: 1, count: 1, home: 0 })), [{ id: 9, color: 0, count: 26, home: 1 }]];
-  for (let k = 0; k < 5; k++) deploy(st, 0);
+  for (let k = 0; k < 4; k++) deploy(st, 0);
+  assert.equal(isJammed(st), false, 'one pad is still free');
+  deploy(st, 0);
   assert.equal(isJammed(st), true);
-  assert.equal(addSlot(st), true);
-  assert.equal(isJammed(st), false);
-  deploy(st, 1);
-  assert.ok(recall(st, 0));
 });
 
-test('blast clears cubes and crew of a vanished colour leave', () => {
+test('crew of a vanished colour leave', () => {
   const m = solid(3);
   m.cells[13] = 2;
   const st = makeBoard(m);
   st.columns = [[{ id: 0, color: 1, count: 1, home: 0 }]];
-  blast(st, 13, 1.01);
+  removeCube(st, 4);  // open the front
+  removeCube(st, 13); // the only cube of the second colour
   assert.equal(st.remaining[1], 0);
   assert.equal(purgeCleared(st).length, 1);
 });
@@ -67,6 +66,7 @@ for (let n = 0; n < LEVELS.length; n++) {
     const counts = new Array(L.model.palette.length).fill(0);
     for (const col of L.board.columns) for (const s of col) counts[s.color] += s.count;
     assert.deepEqual([...counts], [...L.board.remaining], 'crew shots match cubes per colour');
-    console.log(`  L${n + 1} ${L.def.name}: ${L.board.total} cubes, ${L.model.palette.length} colours, ${L.shooters} crew, deal ${L.dealIndex}`);
+    assert.equal(L.board.slots.length, L.def.pads || 5, 'pads as the level asks');
+    console.log(`  L${n + 1} ${L.def.name}: ${L.board.total} cubes, ${L.model.palette.length} colours (${L.model.names.join(' ')}), ${L.shooters} crew, ${L.board.slots.length} pads, deal ${L.dealIndex}`);
   });
 }

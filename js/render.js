@@ -60,7 +60,6 @@ export class Stage {
 
     this.angle = 0.6; this.vel = 0; this.tilt = 0.32; this.auto = 0.32;
     this.flashes = new Map();
-    this.raycaster = new THREE.Raycaster();
     this.resize();
   }
 
@@ -170,16 +169,6 @@ export class Stage {
     this.burst(i, this.colors[this.model.cells[i] - 1], 7);
   }
 
-  // Removes a cube at once (bombs and sweeps), with a smaller burst.
-  smash(i, chips = 4) {
-    const id = this.idOf[i];
-    if (id < 0) return;
-    this.mesh.setMatrixAt(id, ZERO);
-    this.mesh.instanceMatrix.needsUpdate = true;
-    this.idOf[i] = -1;
-    this.burst(i, this.colors[this.model.cells[i] - 1], chips);
-  }
-
   burst(i, color, n) {
     const p = this.world(i, new THREE.Vector3());
     for (let k = 0; k < n; k++) {
@@ -210,18 +199,6 @@ export class Stage {
       this.chips.setColorAt(id, this.colors[k % this.colors.length]);
     }
     this.chips.instanceColor.needsUpdate = true;
-  }
-
-  // Finds the cell under a tap, or -1.
-  pick(clientX, clientY) {
-    if (!this.mesh) return -1;
-    const r = this.canvas.getBoundingClientRect();
-    const ndc = new THREE.Vector2(((clientX - r.left) / r.width) * 2 - 1, -((clientY - r.top) / r.height) * 2 + 1);
-    this.raycaster.setFromCamera(ndc, this.camera);
-    const hit = this.raycaster.intersectObject(this.mesh, false)[0];
-    if (!hit || hit.instanceId === undefined) return -1;
-    const cell = this.cellOf[hit.instanceId];
-    return this.idOf[cell] >= 0 ? cell : -1;
   }
 
   drag(dx) { this.angle += dx * 0.012; this.vel = dx * 0.6; }
@@ -271,46 +248,6 @@ export class Stage {
     if (live || this.chipsWereLive) this.chips.instanceMatrix.needsUpdate = true;
     this.chipsWereLive = live;
     this.renderer.render(this.scene, this.camera);
-  }
-
-  // A small picture of a model for the level strip, drawn once with a spare renderer.
-  static thumbnail(model, size = 160) {
-    if (!Stage.thumbRenderer) {
-      const c = document.createElement('canvas');
-      Stage.thumbRenderer = new THREE.WebGLRenderer({ canvas: c, antialias: true, alpha: true, preserveDrawingBuffer: true });
-      Stage.thumbRenderer.outputColorSpace = THREE.SRGBColorSpace;
-    }
-    const r = Stage.thumbRenderer;
-    r.setPixelRatio(1);
-    r.setSize(size, size, false);
-    const scene = new THREE.Scene();
-    scene.add(new THREE.HemisphereLight('#ffffff', '#f3c9a6', 1.8));
-    const sun = new THREE.DirectionalLight('#ffffff', 2);
-    sun.position.set(6, 14, 10);
-    scene.add(sun);
-    const geo = new THREE.BoxGeometry(0.94, 0.94, 0.94);
-    const mesh = new THREE.InstancedMesh(geo, new THREE.MeshStandardMaterial({ roughness: 0.45 }), model.cells.filter(Boolean).length);
-    const colors = model.palette.map(h => new THREE.Color(h));
-    const { sx, sy, sz } = model;
-    let k = 0;
-    for (let i = 0; i < model.cells.length; i++) {
-      if (!model.cells[i]) continue;
-      const x = i % sx, y = Math.floor(i / sx) % sy, z = Math.floor(i / (sx * sy));
-      tmpM.makeTranslation(x - (sx - 1) / 2, y - (sy - 1) / 2, z - (sz - 1) / 2);
-      mesh.setMatrixAt(k, tmpM);
-      mesh.setColorAt(k++, colors[model.cells[i] - 1]);
-    }
-    mesh.rotation.y = 0.65;
-    scene.add(mesh);
-    const cam = new THREE.PerspectiveCamera(30, 1, 0.1, 500);
-    const R = Math.hypot(sx, sy, sz) / 2;
-    const d = R / Math.sin(THREE.MathUtils.degToRad(15)) * 1.02;
-    cam.position.set(0, d * 0.28, d * 0.96);
-    cam.lookAt(0, 0, 0);
-    r.render(scene, cam);
-    const url = r.domElement.toDataURL('image/png');
-    geo.dispose(); mesh.dispose();
-    return url;
   }
 }
 
