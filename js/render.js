@@ -3,6 +3,8 @@ import * as THREE from 'three';
 import { RoundedBoxGeometry } from '../vendor/RoundedBoxGeometry.js';
 
 const CHIP_POOL = 900;
+const FLING = 1.2;     // fastest turn, rad/s, the sculpture keeps when a finger lets go
+const AUTO_REST = 1;   // seconds the automatic turn waits after a drag
 const tmpM = new THREE.Matrix4();
 const tmpV = new THREE.Vector3();
 const tmpQ = new THREE.Quaternion();
@@ -59,6 +61,7 @@ export class Stage {
     this.chipNext = 0;
 
     this.angle = 0.6; this.vel = 0; this.tilt = 0.32; this.auto = 0.32;
+    this.turn = this.auto; this.dragging = false; this.dragVel = 0; this.rest = 0;
     this.flashes = new Map();
     this.resize();
   }
@@ -143,24 +146,6 @@ export class Stage {
     return { x: r.left + (v.x * 0.5 + 0.5) * r.width, y: r.top + (-v.y * 0.5 + 0.5) * r.height };
   }
 
-  // Picks the target among exposed cubes: the one facing the camera most, with a little spread.
-  chooser() {
-    const cam = this.camera.position;
-    return set => {
-      let best = -1, score = -Infinity, n = 0;
-      const stride = set.size > 60 ? Math.ceil(set.size / 60) : 1;
-      let k = Math.floor(Math.random() * stride);
-      for (const i of set) {
-        if (k++ % stride) continue;
-        const w = this.world(i);
-        const s = -w.distanceTo(cam) + Math.random() * 3;
-        if (s > score) { score = s; best = i; }
-        if (++n > 60) break;
-      }
-      return best;
-    };
-  }
-
   // The cube was hit: it flashes white and swells for a moment, then bursts into chips.
   hit(i) {
     const id = this.idOf[i];
@@ -201,11 +186,30 @@ export class Stage {
     this.chips.instanceColor.needsUpdate = true;
   }
 
-  drag(dx) { this.angle += dx * 0.012; this.vel = dx * 0.6; }
+  // Turning by hand. The speed is distance over time, smoothed over about 60 ms, so it does not
+  // depend on how often the screen reports the finger; on letting go it is capped at FLING, and
+  // a finger that stopped before lifting leaves the sculpture still. The automatic turn stops
+  // while dragging and eases back in AUTO_REST seconds later.
+  dragStart() { this.dragging = true; this.vel = 0; this.dragVel = 0; this.turn = 0; }
+  drag(dx, ms) {
+    const da = dx * 0.012;
+    this.angle += da;
+    if (ms > 0) this.dragVel += (da / (ms / 1000) - this.dragVel) * Math.min(1, ms / 60);
+  }
+  dragEnd(stillMs) {
+    if (!this.dragging) return;
+    this.dragging = false;
+    const v = stillMs > 90 ? 0 : this.dragVel;
+    this.vel = Math.max(-FLING, Math.min(FLING, v));
+    this.rest = AUTO_REST;
+  }
 
   update(dt) {
     this.vel *= Math.pow(0.04, dt);
-    this.angle += (this.auto + this.vel) * dt;
+    if (this.rest > 0) this.rest -= dt;
+    const want = this.dragging || this.rest > 0 ? 0 : this.auto;
+    this.turn += (want - this.turn) * Math.min(1, dt * 2.5);
+    this.angle += (this.turn + (this.dragging ? 0 : this.vel)) * dt;
     this.spin.rotation.y = this.angle;
     this.spin.updateMatrixWorld();
     if (this.mesh && this.flashes.size) {

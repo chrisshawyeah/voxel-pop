@@ -14,6 +14,9 @@ const config: VerifyConfig = {
     viewports: [
       { id: "phone", width: 390, height: 844, dpr: 3, mobile: true },
       { id: "laptop", width: 1280, height: 800, dpr: 2 },
+      // short windows: the sculpture goes beside the pads and lines (css/game.css)
+      { id: "phone-sideways", width: 844, height: 390, dpr: 3, mobile: true },
+      { id: "short-laptop", width: 1280, height: 480, dpr: 2 },
     ],
   },
 };

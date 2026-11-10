@@ -1,6 +1,11 @@
 // Every sound is made on the spot with the Web Audio API; there are no sound files.
+// The sound button in the top bar sets `on` for both the sounds and the buzz (js/main.js).
 
-const NOTES = [523.25, 587.33, 659.25, 783.99, 880, 1046.5, 1174.66, 1318.5];
+// Ordinary pops are soft, low and nearly the same note, and however many shots land (the pads
+// fire about 30 shots a second each) at most one sounds every POP_GAP seconds. The bright rising
+// notes are kept for a crew member finishing, a colour cleared and a level won.
+const POPS = [392, 440, 392, 415.3];
+const POP_GAP = 0.11; // about 9 pops a second at most
 
 export class Sound {
   constructor() {
@@ -39,21 +44,25 @@ export class Sound {
     o.stop(t + dur + 0.02);
   }
 
-  // A cube pops. Throttled so a big volley doesn't turn into noise.
+  // A cube pops (many landing together make one soft pop).
   pop() {
     if (!this.ctx) return;
     const now = this.ctx.currentTime;
-    if (now - this.lastPop < 0.035) return;
+    if (now - this.lastPop < POP_GAP) return;
     this.lastPop = now;
-    this.popIndex = (this.popIndex + 1 + Math.floor(Math.random() * 2)) % NOTES.length;
-    this.tone(NOTES[this.popIndex] * 0.5, 0.07, { type: 'triangle', vol: 0.16, slide: 1.6 });
+    this.popIndex = (this.popIndex + 1) % POPS.length;
+    this.tone(POPS[this.popIndex], 0.06, { type: 'triangle', vol: 0.1, slide: 1.3 });
   }
 
   send() { this.tone(330, 0.12, { vol: 0.25, slide: 1.8 }); }
   done() { this.tone(784, 0.1, { vol: 0.16 }); this.tone(1046, 0.14, { vol: 0.14, delay: 0.07 }); }
+  clear() { [659, 880, 1175, 1568].forEach((f, i) => this.tone(f, 0.16, { type: 'triangle', vol: 0.17, delay: i * 0.06 })); }
   reveal() { [1318, 1568, 2093].forEach((f, i) => this.tone(f, 0.09, { vol: 0.08, delay: i * 0.05 })); }
   nope() { this.tone(220, 0.12, { type: 'square', vol: 0.06 }); }
   win() { [523, 659, 784, 1046, 1318].forEach((f, i) => this.tone(f, 0.22, { type: 'triangle', vol: 0.2, delay: i * 0.09 })); }
+  allClear() {
+    [523, 659, 784, 1046, 784, 1046, 1318, 1568, 2093].forEach((f, i) => this.tone(f, 0.26, { type: 'triangle', vol: 0.2, delay: i * 0.11 }));
+  }
   jam() { [392, 330, 262].forEach((f, i) => this.tone(f, 0.25, { type: 'triangle', vol: 0.18, delay: i * 0.14 })); }
 }
 

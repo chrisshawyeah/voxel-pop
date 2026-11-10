@@ -1,7 +1,9 @@
 # Crumble Crew, the iPhone app
 
 An Expo app whose one screen is a full-screen web view of the game at
-https://chrisshawyeah.github.io/voxel-pop/ . Game changes need no new install.
+https://chrisshawyeah.github.io/voxel-pop/ . Game changes need no new install: the app loads the
+page again when it opens, when it comes back after more than five minutes away (`STALE_MS` in
+`App.js`), and when iOS has stopped the page in the background.
 
 Build (on a build Mac, never the MacBook): make a blank Expo app, copy `App.js`, `app.json`
 and `assets/` over it, add `react-native-webview`, `npx expo prebuild -p ios`, then build
