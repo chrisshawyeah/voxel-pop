@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { makeBoard, cloneBoard, removeCube, deploy, fire, step, settle, launch, target, isJammed, isWon, canFire, purgeCleared, isExposed, FLIGHT } from '../js/logic.js';
+import { makeBoard, cloneBoard, removeCube, deploy, fire, step, settle, launch, target, isJammed, isWon, canFire, canReach, purgeCleared, isExposed, FLIGHT } from '../js/logic.js';
 import { LEVELS, buildLevel, dealLevel } from '../js/levels.js';
 import { plan, greedyCheck, GREEDY_PLAYS } from '../tools/players.mjs';
 
@@ -61,6 +61,21 @@ test('a crew member frees its pad the moment its last shot leaves', () => {
   assert.equal(st.slots[0], null, 'pad free while both shots are still flying');
   assert.equal(st.flying.length, 2);
   assert.equal(deploy(st, 0).slot, 0, 'the next crew member lands on that pad at once');
+  settle(st);
+  assert.equal(isWon(st), true);
+});
+
+test('a crew member landing on its pad waits its ticks, and landing is not out of room', () => {
+  const st = makeBoard(stack(1));
+  st.slots = [null];
+  st.columns = [[crew(0, 0, 1)]];
+  deploy(st, 0, 3); // the game sends with a landing pause; the test players send with none
+  assert.equal(canFire(st, 0), false, 'still landing');
+  assert.equal(canReach(st, 0), true, 'but it has something to hit');
+  assert.equal(isJammed(st), false, 'the only pad is full, yet landing is not a jam');
+  assert.equal(step(st).shots.length, 0);
+  assert.equal(step(st).shots.length, 0);
+  assert.equal(step(st).shots.length, 1, 'the first shot leaves on the third tick');
   settle(st);
   assert.equal(isWon(st), true);
 });

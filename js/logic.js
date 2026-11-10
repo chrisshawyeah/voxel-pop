@@ -123,15 +123,19 @@ export function freeSlot(st) {
   return st.slots.findIndex(s => s === null);
 }
 
-// Moves the front shooter of a column into the first free slot.
+// Moves the front shooter of a column into the first free slot. `land` is how many ticks it
+// takes to land there before its first shot (the game gives the flight to the pad time to
+// finish; the tests and test players send with 0, which changes nothing for a player who waits
+// for the pads to stop: a crew member sent alone fires the same shots a few ticks later).
 // Returns { slot, shooter, revealed } or null when the column is empty or no slot is free.
-export function deploy(st, col) {
+export function deploy(st, col, land = 0) {
   const column = st.columns[col];
   if (!column || !column.length) return null;
   const slot = freeSlot(st);
   if (slot < 0) return null;
   const shooter = column.shift();
   shooter.hidden = false;
+  shooter.land = land;
   st.slots[slot] = shooter;
   let revealed = null;
   if (column.length && column[0].hidden) { column[0].hidden = false; revealed = column[0]; }
@@ -139,10 +143,13 @@ export function deploy(st, col) {
 }
 
 // st.exposed[c] holds the cubes of colour c that can be hit and that no shot has taken yet.
-export function canFire(st, slot) {
+// canReach: the crew member on this pad has something to hit, landed or not (what the screen
+// shows as awake); canFire: it can shoot this tick.
+export function canReach(st, slot) {
   const s = st.slots[slot];
   return !!s && s.count > 0 && st.exposed[s.color].size > 0;
 }
+export const canFire = (st, slot) => canReach(st, slot) && !(st.slots[slot].land > 0);
 
 // The cube a crew member of colour c would hit now under the targeting rule; -1 when none.
 export function target(st, c) {
@@ -170,8 +177,9 @@ export function launch(st, slot) {
 // A shot lands: its cube goes and the cubes behind it open up.
 export const land = (st, cell) => removeCube(st, cell);
 
-// One tick: the shots due now land (in the order they left), then every pad that can fire
-// sends one shot, pad by pad from the left. Returns what happened, for the screen.
+// One tick: the shots due now land (in the order they left), crew still landing on a pad come
+// one tick closer, then every pad that can fire sends one shot, pad by pad from the left.
+// Returns what happened, for the screen.
 export function step(st) {
   st.tick++;
   const landed = [];
@@ -180,6 +188,7 @@ export function step(st) {
     land(st, cell);
     landed.push(cell);
   }
+  for (const s of st.slots) if (s && s.land > 0) s.land--;
   const shots = [];
   for (let i = 0; i < st.slots.length; i++) {
     const shot = launch(st, i);
@@ -188,7 +197,7 @@ export function step(st) {
   return { landed, shots };
 }
 
-export const busy = st => st.flying.length > 0 || st.slots.some((_, i) => canFire(st, i));
+export const busy = st => st.flying.length > 0 || st.slots.some((_, i) => canReach(st, i));
 
 // Runs ticks until every shot has landed and no pad can fire: what a player who waits sees.
 export function settle(st) {
@@ -226,7 +235,7 @@ export function purgeCleared(st) {
 // (pads full or queues empty).
 export function isJammed(st) {
   if (isWon(st) || st.flying.length) return false;
-  for (let i = 0; i < st.slots.length; i++) if (canFire(st, i)) return false;
+  for (let i = 0; i < st.slots.length; i++) if (canReach(st, i)) return false;
   const anyQueued = st.columns.some(c => c.length);
   return freeSlot(st) < 0 || !anyQueued;
 }
