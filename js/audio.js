@@ -6,13 +6,26 @@
 // notes are kept for a crew member finishing, a colour cleared and a level won.
 const POPS = [392, 440, 392, 415.3];
 const POP_GAP = 0.11; // about 9 pops a second at most
+const VOLUME = 0.5;
 
 export class Sound {
   constructor() {
-    this.on = true;
+    this._on = true;
     this.ctx = null;
     this.lastPop = 0;
     this.popIndex = 0;
+  }
+
+  // Off silences everything at once, notes already playing or scheduled (a fanfare) included:
+  // the master volume goes to 0 within 5 ms. On brings it back.
+  get on() { return this._on; }
+  set on(v) {
+    this._on = !!v;
+    if (!this.master) return;
+    const g = this.master.gain, t = this.ctx.currentTime;
+    g.cancelScheduledValues(t);
+    g.setValueAtTime(g.value, t);
+    g.linearRampToValueAtTime(this._on ? VOLUME : 0, t + 0.005);
   }
 
   // Browsers start audio only after a tap.
@@ -22,7 +35,7 @@ export class Sound {
       if (!AC) return;
       this.ctx = new AC();
       this.master = this.ctx.createGain();
-      this.master.gain.value = 0.5;
+      this.master.gain.value = this._on ? VOLUME : 0;
       this.master.connect(this.ctx.destination);
     }
     if (this.ctx.state === 'suspended') this.ctx.resume();
@@ -59,6 +72,7 @@ export class Sound {
   clear() { [659, 880, 1175, 1568].forEach((f, i) => this.tone(f, 0.16, { type: 'triangle', vol: 0.17, delay: i * 0.06 })); }
   reveal() { [1318, 1568, 2093].forEach((f, i) => this.tone(f, 0.09, { vol: 0.08, delay: i * 0.05 })); }
   nope() { this.tone(220, 0.12, { type: 'square', vol: 0.06 }); }
+  undo() { this.tone(523, 0.1, { vol: 0.14, slide: 0.6 }); }
   win() { [523, 659, 784, 1046, 1318].forEach((f, i) => this.tone(f, 0.22, { type: 'triangle', vol: 0.2, delay: i * 0.09 })); }
   allClear() {
     [523, 659, 784, 1046, 784, 1046, 1318, 1568, 2093].forEach((f, i) => this.tone(f, 0.26, { type: 'triangle', vol: 0.2, delay: i * 0.11 }));

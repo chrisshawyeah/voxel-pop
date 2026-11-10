@@ -7,7 +7,8 @@
 // when it leaves (that cube is then taken: no second shot aims at it) and the cube is removed,
 // opening the one under it, only when the shot lands, FLIGHT ticks later. The game runs one
 // tick every FIRE_GAP seconds (js/main.js); the test players run the same ticks back to back,
-// so a player who waits for the pads to stop sees exactly the board the checks saw.
+// so a player who waits for the pads to stop sees exactly the board the checks saw, and the
+// checks also play each winning line with the sends overlapping in time (tools/players.mjs).
 
 export const START_SLOTS = 5; // launch pads, unless the level says otherwise (pads: in levels.js)
 export const FLIGHT = 9;      // ticks from a shot leaving its pad to landing (9 x 1/30 s = 0.3 s)
@@ -160,7 +161,9 @@ export function target(st, c) {
 
 // One shot leaves a pad: it takes its cube (no other shot aims at it) and is in the air until
 // tick `at`. A crew member that has just sent its last shot leaves the pad at once, so the pad
-// is free for the next one while that shot is still flying.
+// is free for the next one while that shot is still flying. A shot in the air remembers when it
+// left, from which pad, in which colour and whose it is, so the screen can draw it from the
+// rules alone (and draw it again after an undo).
 // Returns { slot, shooter, cell, freed } or null when the pad cannot fire.
 export function launch(st, slot) {
   if (!canFire(st, slot)) return null;
@@ -168,7 +171,7 @@ export function launch(st, slot) {
   const cell = target(st, s.color);
   st.exposed[s.color].delete(cell);
   s.count--;
-  st.flying.push({ cell, at: st.tick + FLIGHT });
+  st.flying.push({ cell, at: st.tick + FLIGHT, from: st.tick, slot, color: s.color, id: s.id });
   const freed = s.count <= 0;
   if (freed) st.slots[slot] = null;
   return { slot, shooter: s, cell, freed };
@@ -203,6 +206,89 @@ export const busy = st => st.flying.length > 0 || st.slots.some((_, i) => canRea
 export function settle(st) {
   while (busy(st)) step(st);
   return st;
+}
+
+// One tick exactly as the game runs it: step(), then crew whose colour is gone leave (a dealt
+// level never has any). The game, the forecast and replay() all tick through here, so they
+// agree to the cube.
+export function tickGame(st) {
+  const r = step(st);
+  r.gone = r.landed.length ? purgeCleared(st) : [];
+  return r;
+}
+
+// Nothing would change in a tick but the clock: no shot in the air, nobody landing, nothing that
+// can fire.
+const idle = st => !st.flying.length && st.slots.every(s => !s || (!(s.land > 0) && !(s.count > 0 && st.exposed[s.color].size)));
+
+// Runs the game's ticks until st.tick is `tick` (a quiet board skips straight there).
+export function advance(st, tick) {
+  while (st.tick < tick) {
+    if (idle(st)) { st.tick = tick; break; }
+    tickGame(st);
+  }
+  return st;
+}
+
+// What sending the front of line `col` now would do if nothing else were sent after it: the
+// rules run on a copy of the board, with the crew already on the pads, the shots in the air,
+// the landing pause and the one targeting rule, until that crew member has sent its last shot
+// (it finishes and frees its pad) or nothing can fire any more (it parks, with `left` shots).
+// null when it cannot be sent now (the line is empty or every pad is taken).
+export function forecast(st, col, land = 0) {
+  const sim = cloneBoard(st);
+  const d = deploy(sim, col, land);
+  if (!d) return null;
+  const me = d.shooter;
+  for (;;) {
+    if (sim.slots[d.slot] !== me) return { finishes: true, left: 0 };
+    if (!busy(sim)) return { finishes: false, left: me.count };
+    tickGame(sim);
+  }
+}
+
+// A level being played: its board, the sends made so far (line and tick) and a copy of the
+// board from just before each one, so the last send can be taken back, again and again, to
+// the start of the level. replay() rebuilds all of it from the sends alone, which is what the
+// game keeps in the browser's storage.
+export class Attempt {
+  constructor(board) {
+    this.board = board;
+    this.sends = [];
+    this.before = [];
+  }
+
+  get canUndo() { return this.before.length > 0; }
+
+  // Sends the front of line `col` the way deploy() does; null when it cannot go.
+  send(col, land = 0) {
+    const copy = cloneBoard(this.board);
+    const d = deploy(this.board, col, land);
+    if (!d) return null;
+    this.before.push(copy);
+    this.sends.push([col, copy.tick]);
+    return d;
+  }
+
+  // The board as it was just before the last send: cubes, lines, pads, shots in the air, clock.
+  undo() {
+    if (!this.before.length) return false;
+    this.board = this.before.pop();
+    this.sends.pop();
+    return true;
+  }
+
+  // Plays `sends` on a fresh copy of `start` with the game's own ticks and returns the attempt
+  // as it stood just after the last of them, or null when they do not fit the board.
+  static replay(start, sends, land = 0) {
+    const a = new Attempt(cloneBoard(start));
+    for (const s of sends) {
+      if (!Array.isArray(s) || !Number.isInteger(s[0]) || !Number.isInteger(s[1]) || s[1] < a.board.tick) return null;
+      advance(a.board, s[1]);
+      if (!a.send(s[0], land)) return null;
+    }
+    return a;
+  }
 }
 
 // One shot that lands at once (for tests and quick checks; the game and players use step()).

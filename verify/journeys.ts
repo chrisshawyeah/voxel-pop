@@ -1,4 +1,5 @@
-// The main flow of the levels-only game: win a level, move between levels, run out of room.
+// The main flow of the levels-only game: win a level, move between levels, run out of room and
+// undo.
 // The game is a canvas with buttons below it. The journeys choose what to send by a simple rule
 // read from the board the game exposes as window.crumble, then tap the front of that line with
 // a real click at its place on the screen, so a button that is hidden, covered or cut off fails.
@@ -33,6 +34,37 @@ const pickLine = (page: any, want: "can-hit" | "buried") =>
     return want === "can-hit" && quiet && lines.length ? lines[0] : -1;
   }, want);
 
+// Who is where, as text: every line front to back and every pad. Two equal ones are the same board
+// as far as the player can tell (a "?" is marked).
+const where = (page: any) =>
+  page.evaluate(() => {
+    const g = (window as any).crumble;
+    const st = g.board;
+    return {
+      s: g.state, cleared: st.cleared,
+      lines: st.columns.map((c: any[]) => c.map((x: any) => `${x.color}:${x.count}${x.hidden ? "?" : ""}`).join(" ")).join(" | "),
+      pads: st.slots.map((x: any) => (x ? `${x.color}:${x.count}` : "_")).join(" "),
+    };
+  });
+const same = (a: any, b: any, what: string) => {
+  const diff = ["s", "cleared", "lines", "pads"].filter(k => a[k] !== b[k]);
+  if (diff.length) throw new Error(`${what}: ${diff.map(k => `${k} is ${JSON.stringify(a[k])}, was ${JSON.stringify(b[k])}`).join("; ")}`);
+};
+
+// Fails unless every element matching `sel` lies inside the window.
+const inside = async (page: any, sel: string, what: string) => {
+  const out = await page.evaluate((sel: string) => {
+    const bad: string[] = [];
+    document.querySelectorAll(sel).forEach((el, k) => {
+      const r = el.getBoundingClientRect();
+      if (r.left < 0 || r.top < 0 || r.right > innerWidth + 0.5 || r.bottom > innerHeight + 0.5) bad.push(`#${k + 1} at ${Math.round(r.left)},${Math.round(r.top)} to ${Math.round(r.right)},${Math.round(r.bottom)}`);
+    });
+    return { n: document.querySelectorAll(sel).length, bad, w: innerWidth, h: innerHeight };
+  }, sel);
+  if (!out.n) throw new Error(`${what}: nothing on the screen`);
+  if (out.bad.length) throw new Error(`${what} cut off in a ${out.w}x${out.h} window: ${out.bad.join(", ")}`);
+};
+
 // Sends one crew member by the rule with a real tap on its button; false when it sends nothing.
 const send = async (page: any, want: "can-hit" | "buried") => {
   const i = await pickLine(page, want);
@@ -62,14 +94,17 @@ const whole = async (page: any, level: number, crew?: number) => {
   return b;
 };
 
-// Fills every pad with buried crew. True once the game says it is out of room.
-const fillWithBuried = async (page: any) => {
+// Fills every pad with buried crew. True once the game says it is out of room. `before` gets who
+// was where just before each send (nothing moves meanwhile: buried crew have nothing to hit).
+const fillWithBuried = async (page: any, before: any[]) => {
+  before.length = 0;
   const end = Date.now() + 20_000;
   while (Date.now() < end) {
     const b = await board(page);
     if (b.s === "jam") return true;
     if (b.cleared > 0) return false;
-    if (await send(page, "buried")) await page.waitForTimeout(250);
+    const was = await where(page);
+    if (await send(page, "buried")) { before.push(was); await page.waitForTimeout(250); }
     else if (!b.free) await page.waitForTimeout(300); // every pad full: the game calls it in under a second
     else return false; // no buried front left and a pad still free
   }
@@ -103,13 +138,29 @@ export const journeys = [
         },
       },
       {
-        caption: "A tap behind the front",
+        caption: "A tap behind the front shows the whole line",
         run: async (ctx: any) => {
           const before = await board(ctx.page);
           await ctx.page.locator("#queues .col .slot.s2").first().click({ timeout: 5000 });
           await ctx.page.waitForTimeout(300);
-          const after = await board(ctx.page);
+          const shown = await ctx.page.evaluate(() => {
+            const box = document.getElementById("preview")!;
+            const rows = Array.from(box.querySelectorAll("li"));
+            const ci = Array.from(document.querySelectorAll("#queues .col")).findIndex(c => c.querySelector(".slot.s2"));
+            return { open: !box.hidden, rows: rows.length, low: rows.filter(r => r.getBoundingClientRect().height < 44).length, line: (window as any).crumble.board.columns[ci].length };
+          });
+          if (!shown.open) throw new Error("a tap on the second row did not open the line");
+          if (shown.rows !== shown.line) throw new Error(`the line has ${shown.line} crew, the preview shows ${shown.rows}`);
+          if (shown.low) throw new Error(`${shown.low} rows of the preview are under 44 px tall`);
+          await inside(ctx.page, "#preview", "the line's preview");
+          let after = await board(ctx.page);
           if (after.onPads !== before.onPads || after.crew !== before.crew) throw new Error("a tap on the second row sent a crew member");
+          // Any tap closes it, a tap on a front crew member too, and sends nobody.
+          await ctx.page.locator("#queues .col button.front").first().click({ timeout: 5000 });
+          await ctx.page.waitForTimeout(300);
+          if (!(await ctx.page.evaluate(() => document.getElementById("preview")!.hidden))) throw new Error("the preview stayed open after a tap");
+          after = await board(ctx.page);
+          if (after.onPads !== before.onPads || after.crew !== before.crew) throw new Error("the tap that closed the preview sent a crew member");
         },
       },
       {
@@ -168,13 +219,30 @@ export const journeys = [
       { click: "#again", caption: "Start it again" },
       { expect: "Level 2", caption: "Still level 2" },
       { caption: "Fresh level", run: async (ctx: any) => { await whole(ctx.page, 1, ctx.state.crew as number); } },
+      {
+        caption: "Short narrow windows keep every row",
+        run: async (ctx: any) => {
+          const size = ctx.page.viewportSize() ?? { width: 1280, height: 800 };
+          try {
+            for (const [width, height] of [[390, 360], [500, 360]]) {
+              await ctx.page.setViewportSize({ width, height });
+              await ctx.page.waitForTimeout(400);
+              await inside(ctx.page, "#queues .col .slot", `crew rows at ${width}x${height}`);
+              await inside(ctx.page, "#pads .pad", `pads at ${width}x${height}`);
+            }
+          } finally {
+            await ctx.page.setViewportSize(size);
+            await ctx.page.waitForTimeout(400);
+          }
+        },
+      },
     ],
   },
   {
     name: "03-out-of-room",
-    description: "Fill every pad with crew whose colour is buried; a tap restarts the level, whole.",
+    description: "Fill every pad with crew whose colour is buried; a tap undoes the last send, the undo button the one before, and the name restarts the level, whole.",
     tag: "Out of room",
-    intro: "Maya sends up crew whose colours are still buried, and runs out of room.",
+    intro: "Maya sends up crew whose colours are still buried, runs out of room, and takes back her sends.",
     steps: [
       { goto: "/voxel-pop/?level=11", caption: "Level 11" },
       {
@@ -186,12 +254,13 @@ export const journeys = [
             await ctx.page.evaluate((n: number) => (window as any).crumble.start(n - 1), n);
             const b = await whole(ctx.page, n - 1);
             ctx.state.level = b.level; ctx.state.crew = b.crew;
-            if (await fillWithBuried(ctx.page)) return;
+            ctx.state.before = [];
+            if (await fillWithBuried(ctx.page, ctx.state.before as any[])) return;
           }
           throw new Error("no level could be filled with buried crew");
         },
       },
-      { expect: "Out of room. Tap to try again.", caption: "Out of room", highlight: true },
+      { expect: "Out of room. Tap to undo your last send.", caption: "Out of room", highlight: true },
       {
         caption: "Every pad waiting",
         run: async (ctx: any) => {
@@ -202,7 +271,40 @@ export const journeys = [
           if (n.waiting !== n.pads) throw new Error(`${n.waiting} of ${n.pads} pads show a sleeping crew member`);
         },
       },
-      { click: "#stage", caption: "Tap to try again" },
+      {
+        caption: "The message fits a phone held sideways",
+        run: async (ctx: any) => {
+          const size = ctx.page.viewportSize() ?? { width: 1280, height: 800 };
+          try {
+            await ctx.page.setViewportSize({ width: 560, height: 390 });
+            await ctx.page.waitForTimeout(400);
+            await inside(ctx.page, "#banner", "the out-of-room message");
+          } finally {
+            await ctx.page.setViewportSize(size);
+            await ctx.page.waitForTimeout(400);
+          }
+        },
+      },
+      { click: "#stage", caption: "Tap to undo" },
+      {
+        caption: "Back to before the last send",
+        run: async (ctx: any) => {
+          const before = ctx.state.before as any[];
+          if (before.length < 2) throw new Error(`only ${before.length} sends were made`);
+          await ctx.page.waitForTimeout(300);
+          same(await where(ctx.page), before[before.length - 1], "after the tap");
+        },
+      },
+      { click: "#undo", caption: "Undo once more" },
+      {
+        caption: "And the send before that",
+        run: async (ctx: any) => {
+          const before = ctx.state.before as any[];
+          await ctx.page.waitForTimeout(300);
+          same(await where(ctx.page), before[before.length - 2], "after the undo button");
+        },
+      },
+      { click: "#again", caption: "Start it again" },
       { caption: "The level starts over", run: async (ctx: any) => { await whole(ctx.page, ctx.state.level as number, ctx.state.crew as number); } },
     ],
   },

@@ -1,5 +1,7 @@
 // The flat effects layer over everything: shots that home in on their cube, and confetti.
 
+const NEAR = 2 / 3; // the cube starts to flash for the last third of a shot's flight (0.1 s)
+
 export class Fx {
   constructor(canvas) {
     this.canvas = canvas;
@@ -17,9 +19,11 @@ export class Fx {
     this.canvas.height = Math.round(this.h * dpr);
   }
 
-  // A shot from (x, y) to wherever target() says the cube is now; onHit runs when it lands.
-  shoot(x, y, color, target, onHit) {
-    this.shots.push({ x0: x, y0: y, color, target, onHit, t: 0, dur: 0.2 + Math.random() * 0.08, bend: (Math.random() - 0.5) * 90, trail: [] });
+  // A shot from (x, y) to wherever target() says its cube is now. It keeps the rules' clock:
+  // progress() says how far along it is, 0 to 1, and it is gone at 1, the tick the rules land it
+  // (js/main.js pops the cube then). near() runs once, when it is NEAR of the way there.
+  shoot(x, y, color, target, progress, near) {
+    this.shots.push({ x0: x, y0: y, color, target, progress, near, bend: (Math.random() - 0.5) * 90, trail: [] });
   }
 
   get busy() { return this.shots.length > 0; }
@@ -42,9 +46,11 @@ export class Fx {
     g.clearRect(0, 0, this.w, this.h);
     for (let k = this.shots.length - 1; k >= 0; k--) {
       const s = this.shots[k];
-      s.t += dt / s.dur;
+      const p = s.progress();
+      if (p >= 1) { this.shots.splice(k, 1); continue; }
+      if (p >= NEAR && s.near) { s.near(); s.near = null; }
       const end = s.target();
-      const t = Math.min(1, s.t);
+      const t = Math.max(0, p);
       const mx = (s.x0 + end.x) / 2 + s.bend, my = Math.min(s.y0, end.y) - 40;
       const x = (1 - t) * (1 - t) * s.x0 + 2 * (1 - t) * t * mx + t * t * end.x;
       const y = (1 - t) * (1 - t) * s.y0 + 2 * (1 - t) * t * my + t * t * end.y;
@@ -61,7 +67,6 @@ export class Fx {
       g.beginPath(); g.arc(x, y, 5.5, 0, Math.PI * 2); g.fill();
       g.fillStyle = s.color;
       g.beginPath(); g.arc(x, y, 3.5, 0, Math.PI * 2); g.fill();
-      if (s.t >= 1) { this.shots.splice(k, 1); s.onHit(); }
     }
     for (let k = this.confetti.length - 1; k >= 0; k--) {
       const c = this.confetti[k];

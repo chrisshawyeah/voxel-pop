@@ -17,6 +17,9 @@ const config: VerifyConfig = {
       // short windows: the sculpture goes beside the pads and lines (css/game.css)
       { id: "phone-sideways", width: 844, height: 390, dpr: 3, mobile: true },
       { id: "short-laptop", width: 1280, height: 480, dpr: 2 },
+      // short and narrow: one column, the sculpture gets what is left and every crew row stays in view
+      { id: "short-narrow", width: 390, height: 360, dpr: 3, mobile: true },
+      { id: "short-500", width: 500, height: 360, dpr: 2 },
     ],
   },
 };

@@ -32,7 +32,7 @@
 <body>
 <div id="app">
   <header class="top">
-    <span aria-hidden="true"></span>
+    <button class="undo" id="undo" aria-label="Undo the last send" disabled><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M9 14 4 9l5-5"/><path d="M4 9h10a6 6 0 0 1 0 12h-3"/></svg></button>
     <button class="nav" id="prev" aria-label="Previous level"><svg viewBox="0 0 24 24"><path d="M15 5 8 12l7 7"/></svg></button>
     <button class="title" id="again" aria-label="Restart this level">
       <h1 id="level-name">&nbsp;</h1>
@@ -68,12 +68,14 @@
   <main class="stage" id="stage">
     <canvas id="gl"></canvas>
     <div class="loading" id="loading"><span class="cubes"><i></i><i></i><i></i></span><b>Building the level</b></div>
-    <div class="hint" id="hint" hidden><b>Tap the front crew</b><span>Crew pop the top cubes of their colour</span></div>
+    <div class="hint" id="hint" role="status" hidden></div>
     <div class="banner" id="banner" role="status" hidden></div>
     <div class="ending" id="ending" role="status" hidden><b id="ending-title">All levels cleared</b><span>Tap to play again</span></div>
   </main>
   <section class="pads" id="pads" aria-label="Launch pads"></section>
   <section class="queues" id="queues" aria-label="Your crew"></section>
+  <div class="preview" id="preview" role="dialog" tabindex="-1" hidden></div>
+  <p class="sr" id="sr" aria-live="polite"></p>
 </div>
 <canvas id="fx"></canvas>
 

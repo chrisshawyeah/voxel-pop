@@ -3,19 +3,23 @@
 //   node tools/pick-deals.mjs            every level, several at once
 //   node tools/pick-deals.mjs 12         level 12 only
 //   node tools/pick-deals.mjs --write    ... and write the picks into js/levels.js
+//   node tools/pick-deals.mjs 12 --write level 12 only, written into js/levels.js
 //
 // For a level it tries deals of the level's own settings (mix, flip), then of nearby settings,
-// and keeps a deal that the planning player wins (tools/players.mjs) and whose greedy win rate
-// over 300 plays (the same plays the tests make) lands inside the level's `greedy` band, clear
-// of its edges. When no
-// deal lands in the band it keeps the nearest one the planning player wins and says so.
-// It prints one line per level and, at the end, the level lines to copy into js/levels.js.
+// and keeps a deal that the planning player wins (tools/players.mjs) with a line that also wins
+// when the sends overlap in time (lineHolds: sends 0, 150, 300 and 600 ms apart, with the
+// game's landing pause), and whose greedy win rate over 300 plays (the same plays the tests
+// make) lands inside the level's `greedy` band, clear of its edges. When no deal lands in the
+// band it keeps the nearest one the planning player wins and says so. Deals with more than 30
+// crew are skipped. It prints one line per level, with the hasty greedy rate (a greedy player
+// tapping every 150 ms) beside the greedy one, and at the end the level lines to copy into
+// js/levels.js; --write writes them there, for one level or all of them.
 import { readFileSync, writeFileSync } from 'node:fs';
 import { spawn } from 'node:child_process';
 import { cpus } from 'node:os';
 import { fileURLToPath } from 'node:url';
 import { LEVELS, dealLevel, rng } from '../js/levels.js';
-import { greedyRate, greedyCheck, plan } from './players.mjs';
+import { greedyRate, greedyCheck, hastyCheck, lineHolds, plan } from './players.mjs';
 
 const args = process.argv.slice(2);
 const write = args.includes('--write');
@@ -40,26 +44,30 @@ function pick(n) {
   grid.sort((a, b) => dist(a) - dist(b));
   let best = null; // in band, nearest the middle
   let near = null; // out of band, nearest the band
+  let big = 0;     // deals skipped for having more than 30 crew
   const t0 = Date.now();
+  const done = found => ({ n, ...found, hasty: hastyCheck(dealLevel({ ...def0, mix: found.mix, flip: found.flip, deal: found.deal }).board), ms: Date.now() - t0 });
   for (const { mix, flip } of grid) {
     for (let deal = 0; deal < tries; deal++) {
       const def = { ...def0, mix, flip, deal };
       const L = dealLevel(def);
-      if (L.shooters > 30) return { n, error: `${L.shooters} crew: more than 30 sends, use bigger crew` };
+      if (L.shooters > 30) { big++; continue; } // crew sizes change with the deal: another may fit
       const quick = greedyRate(L.board, rng(1000 + deal), 60);
       const off = quick < lo ? lo - quick : quick > hi ? quick - hi : 0;
       if (off > 12 && near && off >= near.off) continue; // far outside the band, and something nearer is known
-      const p = plan(L.board, { budget: 30000 });
-      if (p.win !== true) continue;
+      const p = plan(L.board, { budget: 30000, holds: line => lineHolds(L.board, line) });
+      if (p.win !== true || !p.holds) continue;
       const rate = greedyCheck(L.board);
       const out = rate < lo ? lo - rate : rate > hi ? rate - hi : 0;
       const found = { mix, flip, deal, rate, crew: L.shooters, boards: p.boards, off: out };
-      if (!out && safe(rate)) return { n, ...found, ms: Date.now() - t0 };
+      if (!out && safe(rate)) return done(found);
       if (!out && !best) best = found;
       if (out && (!near || out < near.off)) near = found;
     }
   }
-  return { n, ...(best || near || { error: 'no deal the planning player wins' }), ms: Date.now() - t0 };
+  if (best || near) return done(best || near);
+  const why = big ? `, ${big} deals skipped for more than 30 crew (use bigger crew)` : '';
+  return { n, error: `no deal the planning player wins with a line that holds when sends overlap${why}`, ms: Date.now() - t0 };
 }
 
 const lineOf = (def, p) => {
@@ -71,12 +79,30 @@ const lineOf = (def, p) => {
 const say = (r) => {
   const d = LEVELS[r.n];
   if (r.error) return `L${r.n + 1} ${d.name}: ${r.error}`;
-  return `L${r.n + 1} ${d.name}: deal ${r.deal} mix ${r.mix} flip ${r.flip}  greedy ${r.rate}% (band ${d.greedy.join('-')}%${r.off ? `, MISSED by ${r.off}` : ''})  ${r.crew} crew  ${(r.ms / 1000).toFixed(1)}s`;
+  return `L${r.n + 1} ${d.name}: deal ${r.deal} mix ${r.mix} flip ${r.flip}  greedy ${r.rate}% (band ${d.greedy.join('-')}%${r.off ? `, MISSED by ${r.off}` : ''})  hasty ${r.hasty}%  ${r.crew} crew  ${(r.ms / 1000).toFixed(1)}s`;
 };
+
+// Writes the picked lines into js/levels.js, in place of each level's line.
+function writePicks(results) {
+  const file = new URL('../js/levels.js', import.meta.url);
+  let text = readFileSync(file, 'utf8');
+  let wrote = 0;
+  for (const r of results) {
+    if (!r || r.error) continue;
+    const name = LEVELS[r.n].name.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+    const re = new RegExp(`^  \\{ name: '${name}',.*$`, 'm');
+    if (!re.test(text)) { console.log(`L${r.n + 1}: its line was not found in js/levels.js, not written`); continue; }
+    text = text.replace(re, lineOf({ ...LEVELS[r.n], ...set }, r));
+    wrote++;
+  }
+  writeFileSync(file, text);
+  console.log(`${wrote} level line${wrote === 1 ? '' : 's'} written to js/levels.js`);
+}
 
 if (only !== undefined) {
   const r = pick(Number(only) - 1);
   console.log(json ? JSON.stringify(r) : `${say(r)}\n${r.error ? '' : lineOf({ ...LEVELS[r.n], ...set }, r)}`);
+  if (write && !json) writePicks([r]);
 } else {
   // Every level, one child process per level, as many at once as there are processors.
   const self = fileURLToPath(import.meta.url);
@@ -102,15 +128,5 @@ if (only !== undefined) {
   await Promise.all(Array.from({ length: Math.max(1, cpus().length - 1) }, run));
   console.log('\n// the level lines, picked:');
   for (const r of results) console.log(r.error ? `  // L${r.n + 1}: ${r.error}` : lineOf({ ...LEVELS[r.n], ...set }, r));
-  if (write) {
-    const file = new URL('../js/levels.js', import.meta.url);
-    let text = readFileSync(file, 'utf8');
-    for (const r of results) {
-      if (r.error) continue;
-      const name = LEVELS[r.n].name.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-      text = text.replace(new RegExp(`^  \\{ name: '${name}',.*$`, 'm'), lineOf({ ...LEVELS[r.n], ...set }, r));
-    }
-    writeFileSync(file, text);
-    console.log('written to js/levels.js');
-  }
+  if (write) writePicks(results);
 }
