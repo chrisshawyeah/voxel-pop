@@ -40,6 +40,7 @@ function start(n) {
   $('level-name').textContent = `Level ${current + 1}`;
   $('level-sub').textContent = LEVELS[current].name;
   renderPads(); renderQueues();
+  $('loading').hidden = true;
   say('', 0);
 }
 
