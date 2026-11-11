@@ -382,9 +382,15 @@ export const journeys = [
       { click: "#again", caption: "Start it again" },
       { caption: "The level starts over", run: async (ctx: any) => { await whole(ctx.page, ctx.state.level as number, ctx.state.crew as number); } },
       {
-        caption: "Undo brings back popped cubes and shots in the air",
+        caption: "Undo while shots fly",
         run: async (ctx: any) => {
-          const end = Date.now() + 30_000;
+          // The moment is made, not waited for: level 1 opens two colours at once, so with one ready
+          // crew member sent, a cube pops while its shots still fly, another front is ready and a
+          // pad is free, within a second or two.
+          await ctx.page.evaluate(() => (window as any).crumble.start(0));
+          await whole(ctx.page, 0);
+          if (!(await send(ctx.page, "can-hit"))) throw new Error("level 1 has no ready crew member to send");
+          const end = Date.now() + 15_000;
           for (;;) {
             const ok = await ctx.page.evaluate(() => {
               const st = (window as any).crumble.board;
@@ -392,8 +398,8 @@ export const journeys = [
                 st.columns.some((c: any[]) => c.length && st.exposed[c[0].color].size > 0);
             });
             if (ok) break;
-            if (Date.now() > end) throw new Error("no moment with cubes popped, shots in the air and a ready crew member to send");
-            await ctx.page.waitForTimeout((await send(ctx.page, "can-hit")) ? 120 : 80);
+            if (Date.now() > end) throw new Error("level 1: no moment with cubes popped, shots in the air, a free pad and a ready crew member to send");
+            await ctx.page.waitForTimeout(50);
           }
           // The board is read and the send made in one go, so not a tick passes in between; the
           // same for the undo and the board it gives back.
