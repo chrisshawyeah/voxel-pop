@@ -120,6 +120,13 @@ export class Stage {
     this.frame();
   }
 
+  // How many cubes are drawn standing (for the play-through checks, window.crumble.drawn).
+  get shown() {
+    let n = 0;
+    if (this.idOf) for (const id of this.idOf) if (id >= 0) n++;
+    return n;
+  }
+
   clearChips() {
     for (let k = 0; k < CHIP_POOL; k++) {
       if (this.chipState[k].life <= 0) continue;
