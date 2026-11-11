@@ -39,8 +39,11 @@ const pickLine = (page: any, want: "can-hit" | "buried") =>
 // undos. Two equal ones are the same board.
 const where = (page: any) => page.evaluate(() => (window as any).crumble.snapshot());
 const BOARD = ["state", "level", "cleared", "hash", "lines", "pads", "flying"];
+// A crew member that has just landed carries a short countdown ("6:40+2") that runs on while the
+// check reads the board, so it is left out: who is on each pad and what they have left is compared.
+const settled = (k: string, v: any) => (k === "pads" && typeof v === "string" ? v.replace(/\+\d+/g, "") : v);
 const same = (a: any, b: any, what: string, keys = BOARD) => {
-  const diff = keys.filter(k => a[k] !== b[k]);
+  const diff = keys.filter(k => settled(k, a[k]) !== settled(k, b[k]));
   if (diff.length) throw new Error(`${what}: ${diff.map(k => `${k} is ${JSON.stringify(a[k])}, was ${JSON.stringify(b[k])}`).join("; ")}`);
 };
 // Nothing moving: no shot in the air, nobody landing, nobody on a pad who can fire.
