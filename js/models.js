@@ -7,9 +7,14 @@
 //   s.paint((x, y, z, colour) => ..., 'white')   recolours cubes that are already there
 //   s.set(x, y, z, 'blue')                       one cube; s.set(x, y, z, null) removes it
 //   s.skin(x, y, z)                              true when that cube can be seen from outside
+//   s.depth(x, y, z)                             0 on the outside, 1 just under it, and so on
 //   return s.done();
-// Colours are the names in COLORS; add any you like. A colour buried inside another is what
-// makes a level tricky: its crew have nothing to hit until the outside is opened.
+// Colours are the names in COLORS; add any you like. Any cube on the outside can be hit, from
+// any side, so a sculpture is a puzzle only through its layers: a colour hidden inside others
+// has nothing to hit until the cubes covering it are popped, and its crew wait on a pad. Paint
+// inner layers on cubes of depth 1 or more (s.paint with s.depth) and the sculpture looks the
+// same from outside; a layer of one colour all round a core keeps that core sealed until the
+// layer is broken.
 
 export const COLORS = {
   red: '#ff4b5c', orange: '#ff9a2e', yellow: '#ffd23f', green: '#36c46f', teal: '#1fc6bd',
@@ -41,7 +46,9 @@ class Sculpt {
   set(x, y, z, name) {
     x = Math.round(x); y = Math.round(y); z = Math.round(z);
     if (!this.inside(x, y, z)) return;
-    this.cells[x + this.sx * (y + this.sy * z)] = name ? this.id(name) : 0;
+    const i = x + this.sx * (y + this.sy * z);
+    if (!this.cells[i] !== !name) this.depths = null; // a cube added or removed: depths change
+    this.cells[i] = name ? this.id(name) : 0;
   }
   // fn(x, y, z, current) returns a colour name to set, null to clear, or undefined to leave.
   each(fn) {
@@ -54,8 +61,52 @@ class Sculpt {
   skin(x, y, z) {
     return [[1, 0, 0], [-1, 0, 0], [0, 1, 0], [0, -1, 0], [0, 0, 1], [0, 0, -1]].some(([a, b, c]) => !this.get(x + a, y + b, z + c));
   }
+  // How many cubes lie between this one and the outside: 0 for a cube with a face on the air (the
+  // turntable under the sculpture is not air, as in the game), 1 for one touching only those, and
+  // so on (null where there is no cube). Kept until a cube is added or removed; recolouring keeps it.
+  depth(x, y, z) {
+    if (!this.depths) {
+      const { sx, sy, sz } = this;
+      const d = new Int16Array(this.cells.length).fill(-1);
+      const open = (x, y, z) => [[1, 0, 0], [-1, 0, 0], [0, 1, 0], [0, -1, 0], [0, 0, 1], [0, 0, -1]].some(([a, b, c]) => y + b >= 0 && !this.get(x + a, y + b, z + c));
+      let ring = [];
+      this.each((x, y, z, cur) => { if (cur && open(x, y, z)) { d[x + sx * (y + sy * z)] = 0; ring.push([x, y, z]); } });
+      for (let k = 1; ring.length; k++) {
+        const next = [];
+        for (const [x, y, z] of ring) {
+          for (const [a, b, c] of [[1, 0, 0], [-1, 0, 0], [0, 1, 0], [0, -1, 0], [0, 0, 1], [0, 0, -1]]) {
+            const X = x + a, Y = y + b, Z = z + c;
+            if (!this.get(X, Y, Z)) continue;
+            const i = X + sx * (Y + sy * Z);
+            if (d[i] < 0) { d[i] = k; next.push([X, Y, Z]); }
+          }
+        }
+        ring = next;
+      }
+      this.depths = d;
+    }
+    const v = this.inside(x, y, z) ? this.depths[x + this.sx * (y + this.sy * z)] : -1;
+    return v < 0 ? null : v;
+  }
   fill(test, name) { return this.each((x, y, z) => (test(x, y, z) ? name : undefined)); }
-  paint(test, name) { return this.each((x, y, z, cur) => (cur && test(x, y, z, cur) ? name : undefined)); }
+  // Paints the cubes inside the skin by how deep they sit: depth 1 in names[0], depth 2 in names[1]
+  // and so on, the last name for everything deeper (only cubes `test` picks, all by default). The
+  // skin keeps its colours, so the sculpture looks the same from outside, and each layer seals in
+  // the ones under it.
+  bands(names, test = () => true) {
+    return this.paint((x, y, z, cur) => this.depth(x, y, z) >= 1 && test(x, y, z, cur), (x, y, z) => names[Math.min(this.depth(x, y, z), names.length) - 1]);
+  }
+  // Recolours about `share` of the cubes `test` picks with one of `names`, by a hash of the place
+  // (the same every time): single cubes scattered through a layer, each sealed in by the layer.
+  speckle(test, names, share, seed = 0) {
+    return this.each((x, y, z, cur) => {
+      if (!cur || !test(x, y, z, cur)) return undefined;
+      const h = hash(x + 31 * seed, y, z);
+      return h < share ? names[Math.floor((h / share) * names.length)] : undefined;
+    });
+  }
+  // name may be a function of (x, y, z, current) giving the colour.
+  paint(test, name) { return this.each((x, y, z, cur) => (cur && test(x, y, z, cur) ? (typeof name === 'function' ? name(x, y, z, cur) : name) : undefined)); }
   done() {
     // Re-number colours so the palette holds only the ones still used.
     const used = [...new Set(this.cells)].filter(Boolean).sort((a, b) => a - b);
@@ -101,9 +152,15 @@ function duck() {
     s.paint((x, y, z) => sq(x - e[0]) + sq(y - e[1]) + sq(z - e[2]) <= sq(0.95), 'charcoal');
   }
   s.paint((x, y, z) => Math.abs(z - cz) >= 3.2 && y >= 3 && y <= 5 && x >= 4 && x <= 9, 'orange');
-  // Bath foam over its back: the yellow under it waits until the foam is popped (level 2 teaches that).
+  // Bath foam over its back. Inside, under a layer of pink rubber, more foam at the back, an orange
+  // squeaker in the middle and a black weight in the head: the foam, orange and black crew pop
+  // what shows of their colour, then sleep until the pink round the rest is popped (level 2
+  // teaches that).
   const back = (x, z) => sq(x - 6.6) / sq(5.4) + sq(z - cz) / sq(4.0) <= 1 && x <= 8.5;
   s.paint((x, y, z) => y >= 2 && back(x, z) && !s.get(x, y + 1, z), 'white');
+  s.bands(['pink', 'white']);
+  s.paint((x, y, z) => s.depth(x, y, z) >= 2 && x > 6 && x <= 9, 'orange');
+  s.paint((x, y, z) => s.depth(x, y, z) >= 2 && x > 9, 'charcoal');
   return s.done();
 }
 
@@ -124,6 +181,7 @@ function cactus() {
   s.fill((x, y, z) => y >= 12 && y <= 15 && sq(x - 10) + sq(z - cz) <= sq(1.4), 'green');
   s.fill((x, y, z) => y >= 18 && y <= 19 && r2(x, z) <= sq(y === 18 ? 1.6 : 0.8), 'pink');
   s.fill((x, y, z) => y === 15 && sq(x - 2) + sq(z - cz) <= sq(0.6), 'pink');
+  s.bands(['white', 'grey']); // inside: pale flesh and sand, with grey stones in the middle
   return s.done();
 }
 
@@ -140,7 +198,7 @@ function rocket() {
   s.paint((x, y, z) => z >= cz + 2 && sq(x - cx) + sq(y - 13) <= sq(1.9), 'charcoal');
   s.paint((x, y, z) => z >= cz + 2 && sq(x - cx) + sq(y - 13) <= sq(1.2), 'blue');
   s.paint((x, y, z) => y === 16, 'red');
-  s.paint((x, y, z) => y >= 5 && y <= 15 && r2(x, z) <= sq(1.9), 'grey'); // the engine inside
+  s.bands(['green', 'grey', 'yellow']); // inside: green fuel tanks round a grey engine with a yellow core
   return s.done();
 }
 
@@ -155,15 +213,16 @@ function penguin() {
     s.fill((x, y, z) => y >= 4 && y <= 9 && sq(x - cx - side * 5.2) + sq(z - cz) <= sq(1.2) && Math.abs(x - cx) > 4.4, 'charcoal');
     s.fill((x, y, z) => y === 0 && sq(x - cx - side * 1.8) + sq(z - cz - 1.8) <= sq(1.6), 'orange');
   }
-  // A red scarf round its neck: the head above it and the body below wait on each other (level 3).
+  // A red scarf round its neck.
   const ring = (x, z, a, b) => sq(x - cx) / sq(a) + sq(z - cz) / sq(b) <= 1;
   s.fill((x, y, z) => y >= 8 && y <= 9 && ring(x, z, 5.6, 5.2) && !ring(x, z, 3.0, 2.6), 'red');
   s.fill((x, y, z) => y >= 9 && y <= 10 && Math.abs(x - cx) <= 0.6 && z > cz + 3 && z <= cz + 6, 'orange');
-  // a big heart inside
-  s.paint((x, y, z) => {
-    const u = (x - cx) / 3.1, v = (y - 6.4) / 3.1;
-    return Math.abs(z - cz) <= 1.6 && (u * u + v * v - 1) ** 3 - u * u * v ** 3 <= 0;
-  }, 'pink');
+  // Inside, under a layer of blue ice: green seaweed round the orange fish it ate, more red under the
+  // scarf and more white behind the belly. The orange, red and white crew pop what shows of their
+  // colour, then sleep until the blue round the rest is popped (level 3 teaches that).
+  s.bands(['blue', 'green', 'orange']);
+  s.paint((x, y, z) => s.depth(x, y, z) >= 2 && y >= 8 && y <= 10, 'red');
+  s.paint((x, y, z) => s.depth(x, y, z) >= 2 && z > cz + 0.5 && y < 8, 'white');
   return s.done();
 }
 
@@ -189,6 +248,10 @@ function balloon() {
     s.fill((x, y, z) => y >= 4 && y <= 8 && x === cx + dx && z === cz + dz, 'charcoal');
   }
   s.fill((x, y, z) => y <= 3 && Math.abs(x - cx) <= 2.5 && Math.abs(z - cz) <= 2.5, 'brown');
+  // Inside, where nobody sees it: the envelope full of orange hot air round the flame, under a white
+  // lining.
+  s.fill((x, y, z) => y >= 10 && y <= 22 && Math.sqrt(r2(x, z)) < outer(y) - 2.4, 'orange');
+  s.bands(['white', 'orange']);
   return s.done();
 }
 
@@ -206,6 +269,7 @@ function lighthouse() {
   s.paint((x, y, z) => y >= 19 && y <= 21 && (Math.abs(x - cx) < 0.6 || Math.abs(z - cz) < 0.6) && r2(x, z) > sq(1.6), 'charcoal');
   s.fill((x, y, z) => y >= 22 && y <= 24 && r2(x, z) <= sq(3.2 - (y - 22) * 1.15), 'red');
   s.fill((x, y, z) => y === 25 && r2(x, z) <= 0.3, 'charcoal');
+  s.bands(['orange', 'green', 'brown']); // inside: orange brick, green moss, the brown stairs
   return s.done();
 }
 
@@ -227,8 +291,7 @@ function robot() {
   box(8, 8, 21, 21, 5, 5, 'charcoal');
   box(7, 9, 22, 22, 4, 6, 'red'); s.set(8, 22, 5, 'red');
   box(3, 3, 17, 18, 4, 6, 'grey'); box(13, 13, 17, 18, 4, 6, 'grey');
-  box(4, 12, 7, 12, 3, 7, 'green'); // circuits inside
-  box(5, 11, 16, 19, 3, 7, 'orange');
+  s.bands(['green', 'orange', 'brown']); // inside: green circuits, orange wiring, a brown power core
   return s.done();
 }
 
@@ -269,6 +332,7 @@ function castle() {
   box(10, 14, 2, 10, 9, 11, 'yellow'); // the gold inside the keep
   box(12, 12, 16, 18, 10, 10, 'charcoal');
   box(13, 15, 17, 18, 10, 10, 'yellow');
+  s.bands(['teal', 'orange']); // inside: teal stairs in the towers, orange treasure in the keep
   return s.done();
 }
 
@@ -296,6 +360,8 @@ function dolls() {
   for (const [fx, fy] of [[-2.6, 6], [2.6, 6], [0, 3.6], [0, 8.6]]) {
     s.paint((x, y, z) => z > cz + 3.3 && sq(x - cx - fx) + sq(y - fy) <= sq(1.2), 'orange');
   }
+  // Wood between the dolls, where nobody sees it: green, grey and tan round the little purple one.
+  s.bands(['green', 'grey', 'tan'], (x, y, z, cur) => cur !== 'purple');
   return s.done();
 }
 
@@ -317,6 +383,7 @@ function cupcake() {
   s.fill((x, y, z) => y >= 10 && y <= 11 && r2(x, z) <= sq(2.9), 'lilac');
   s.paint((x, y, z, cur) => cur === 'lilac' && s.skin(x, y, z) && hash(x, y, z) < 0.12, 'yellow'); // sprinkles
   s.fill((x, y, z) => sq(x - cx) + sq(y - 13) + sq(z - cz) <= sq(1.5), 'red'); // the cherry
+  s.bands(['orange', 'brown', 'grey']); // inside: orange jam, brown cake, a grey middle
   return s.done();
 }
 
@@ -332,6 +399,7 @@ function burger() {
   disc(8, 8, 6.0, 'red'); // tomato
   s.fill((x, y, z) => y >= 9 && sq(x - cx) / sq(6.4) + sq(y - 9) / sq(3.6) + sq(z - cz) / sq(6.4) <= 1, 'tan'); // top bun
   s.paint((x, y, z, cur) => cur === 'tan' && y >= 10 && !s.get(x, y + 1, z) && hash(x, y, z) < 0.22, 'white'); // sesame seeds
+  s.bands(['orange', 'purple', 'teal']); // inside: orange sauce, purple onion, teal pickle
   return s.done();
 }
 
@@ -339,9 +407,7 @@ function fish() {
   const s = new Sculpt(19, 13, 9);
   const cy = 6, cz = s.cz;
   s.fill((x, y, z) => sq(x - 11) / sq(6.4) + sq(y - cy) / sq(4.6) + sq(z - cz) / sq(3.4) <= 1, 'orange');
-  // Flat bands across the body, so each colour sits under another: orange on top, a white band,
-  // orange, a charcoal band, orange underneath. (Upright stripes let every colour dig straight
-  // down itself, and nobody ever had to wait.)
+  // A white band and a charcoal band round the body.
   s.paint((x, y) => y === 8, 'white');
   s.paint((x, y) => y === 5, 'charcoal');
   s.fill((x, y, z) => x <= 5 && Math.abs(z - cz) <= 0.6 && Math.abs(y - cy) <= 1 + (5 - x) * 0.9, 'orange'); // tail
@@ -351,6 +417,7 @@ function fish() {
     s.paint((x, y, z) => sq(x - 15) + sq(y - 7) <= sq(1.1) && (z - cz) * side >= 1.5, 'white');
     s.paint((x, y, z) => x === 15 && y === 7 && (z - cz) * side >= 1.5, 'charcoal');
   }
+  s.bands(['red', 'grey']); // inside: red flesh round grey bones
   return s.done();
 }
 
@@ -366,6 +433,7 @@ function gift() {
     s.fill((x, y, z) => y >= 11 && y <= 12 && Math.abs(z - cz) < 0.6 && (x - cx) * side >= 1 && (x - cx) * side <= 3, 'yellow'); // bow
   }
   s.set(cx, 11, cz, 'yellow');
+  s.bands(['orange', 'pink', 'white']); // inside: orange tissue paper round a pink present
   return s.done();
 }
 
@@ -377,13 +445,13 @@ function tree() {
   for (const [y0, h, r] of [[3, 6, 6], [8, 6, 4.8], [13, 6, 3.6]]) { // three tiers, each a cone
     s.fill((x, y, z) => y >= y0 && y < y0 + h && r2(x, z) <= sq(r * (1 - (y - y0) / h) + 0.6), 'green');
   }
-  s.paint((x, y, z) => y >= 3 && y <= 16 && r2(x, z) <= sq(1.2), 'brown'); // the trunk runs up inside
   s.each((x, y, z, cur) => { // baubles on the outside
     if (cur !== 'green' || !s.skin(x, y, z)) return undefined;
     const h = hash(x, y, z);
     return h < 0.07 ? 'red' : h < 0.14 ? 'yellow' : h < 0.19 ? 'blue' : undefined;
   });
   s.fill((x, y, z) => y >= 19 && y <= 21 && Math.abs(x - cx) + Math.abs(y - 20) <= 1 && Math.abs(z - cz) < 0.6, 'yellow'); // star
+  s.bands(['white', 'green', 'orange']); // inside, where the trunk was: snow, more branches, orange lights
   return s.done();
 }
 
@@ -398,6 +466,7 @@ function melon() {
     if (d > 3.5) return 'white';
     return hash(x, y, z) < 0.07 ? 'charcoal' : 'red';
   });
+  s.bands(['yellow', 'orange']); // inside, behind the cut: a yellow layer and an orange heart
   return s.done();
 }
 
@@ -416,6 +485,7 @@ function snowman() {
   s.fill((x, y, z) => y === 20 && r2(x, z) <= sq(3.4), 'charcoal'); // hat
   s.fill((x, y, z) => y >= 21 && y <= 22 && r2(x, z) <= sq(2.2), 'charcoal');
   s.paint((x, y, z) => y === 21 && r2(x, z) > sq(1.2), 'red');
+  s.bands(['grey', 'blue', 'green']); // inside each ball: packed grey snow, blue ice, a green middle
   return s.done();
 }
 
@@ -429,6 +499,7 @@ function house() {
   for (const x0 of [4, 10]) { box(x0, x0 + 1, 5, 6, 10, 10, 'blue'); box(x0, x0 + 1, 5, 6, 2, 2, 'blue'); } // windows
   box(10, 11, 12, 15, 3, 4, 'grey'); // chimney
   box(4, 10, 2, 7, 4, 8, 'yellow'); // the light inside
+  s.bands(['teal', 'orange', 'yellow']); // inside: teal plaster, the orange attic and the light
   return s.done();
 }
 
@@ -436,6 +507,7 @@ function patchwork() {
   const s = new Sculpt(9, 9, 9);
   const names = ['red', 'yellow', 'blue', 'green', 'white', 'orange'];
   s.each((x, y, z) => names[(Math.floor(x / 3) + 2 * Math.floor(y / 3) + 3 * Math.floor(z / 3)) % 6]); // 27 blocks of 27 cubes
+  s.bands(['charcoal', 'brown', 'grey']); // under the skin: charcoal, brown, a grey middle
   return s.done();
 }
 
