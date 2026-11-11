@@ -77,7 +77,8 @@ button:focus-visible { outline: 3px solid var(--ink); outline-offset: 2px; }
   padding: 10px 16px; border-radius: 16px; background: rgba(31, 37, 71, 0.86); color: #fff; text-align: center;
   font-weight: 800; font-size: 18px; line-height: 1.25; pointer-events: none;
 }
-/* the lessons, one line at a time: "Tap the front crew", what the tick means, what a sleeping crew member means */
+/* the lessons, one line at a time: "Tap the front crew", what the tick means, what a sleeping crew
+   member means, and from level 4 "Hold a front crew to preview. Tap to send." */
 .hint {
   position: absolute; left: 50%; bottom: 10px; transform: translateX(-50%); width: max-content; max-width: calc(100% - 20px);
   padding: 8px 14px 9px; border-radius: 16px; text-align: center; pointer-events: none;
@@ -171,10 +172,11 @@ button:focus-visible { outline: 3px solid var(--ink); outline-offset: 2px; }
   background: #fff; color: var(--ink-soft); font-size: 11px; font-weight: 900; line-height: 1; letter-spacing: -0.5px;
   box-shadow: 0 1px 3px rgba(31, 37, 71, 0.25);
 }
-/* Under a front's number on levels 1 to 3: what sending it now would do if nobody else were sent.
-   A tick in a solid pill: it finishes and frees its pad. "parks 23" in a dashed box, like a
-   waiting pad: it would park with 23 still to fire. Under a crew member on a pad, "parks 23" once
-   a later send has made it certain to park. */
+/* Under a front's number (levels 1 to 3, and every level until the player has held a front once):
+   what sending it now would do if no more crew are sent. A tick in a solid pill: it finishes, frees
+   its pad and strands nobody. "parks 23" in a dashed box, like a waiting pad: it would park with 23
+   still to fire. "strands": it finishes, but leaves a crew member already on a pad parked. Under a
+   crew member on a pad, "parks 23" once a later send has made it certain to park. */
 .crew .fc {
   position: absolute; left: 50%; bottom: -7px; transform: translateX(-50%); z-index: 1;
   display: grid; place-items: center; min-width: 22px; height: 16px; padding: 0 5px; border-radius: 8px;
@@ -184,15 +186,18 @@ button:focus-visible { outline: 3px solid var(--ink); outline-offset: 2px; }
 .crew .fc[hidden] { display: none; }
 .crew .fc svg { width: 12px; height: 12px; fill: none; stroke: var(--ink); stroke-width: 2.4; stroke-linecap: round; stroke-linejoin: round; }
 .crew .fc.park { border: 1.5px dashed rgba(74, 80, 120, 0.8); background: rgba(255, 255, 255, 0.92); color: var(--ink-soft); box-shadow: none; }
-/* The same forecast in words above a front while it is held, hovered or has keyboard focus (from
-   level 4 only then): "finishes alone", "parks 23 alone", or "no free pad". */
+/* The same forecast in words above a front while it is held, hovered or has keyboard focus:
+   "finishes", "parks 23", "finishes; strands red 12" over "if no more crew are sent", or
+   "no free pad". */
 .tip {
   position: absolute; left: 50%; bottom: calc(100% + 8px); transform: translateX(-50%);
-  display: flex; align-items: center; gap: 3px; height: 24px; padding: 0 9px; border-radius: 12px;
-  white-space: nowrap; pointer-events: none; font-size: 13px; font-weight: 900; line-height: 1; color: var(--ink);
+  display: grid; justify-items: center; gap: 2px; padding: 4px 9px 5px; border-radius: 12px;
+  white-space: nowrap; pointer-events: none; line-height: 1; color: var(--ink);
   background: #fff; border: 1.5px solid #fff; box-shadow: 0 2px 8px rgba(31, 37, 71, 0.3);
 }
 .tip[hidden] { display: none; }
+.tip b { display: flex; align-items: center; gap: 3px; font-size: 13px; font-weight: 900; }
+.tip small { font-size: 11px; font-weight: 800; color: var(--ink-soft); }
 .tip.park { border-style: dashed; border-color: rgba(74, 80, 120, 0.8); color: var(--ink-soft); }
 .tip svg { width: 13px; height: 13px; fill: none; stroke: var(--ink); stroke-width: 2.4; stroke-linecap: round; stroke-linejoin: round; }
 .col.open { z-index: 6; } /* the open tip sits over the lines beside it and the pads above */

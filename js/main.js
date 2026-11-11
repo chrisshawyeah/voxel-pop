@@ -20,15 +20,16 @@ const CLEAN_KEY = 'crumble-crew.clean-levels';     // which levels have been won
 const ATTEMPT_KEY = n => `crumble-crew.attempt.${n + 1}`; // level n half-played, by its number on screen
 const OLD_ATTEMPT_KEY = 'crumble-crew.attempt';    // the one attempt the game kept before, for any level
 const TAUGHT_KEY = 'crumble-crew.taught';          // the lessons seen, one bit each (SENT, PARK, TICK below)
-const UPDATE_KEY = 'crumble-crew.update-to';       // the version the page last reloaded to load
+const UPDATE_KEY = 'crumble-crew.update-to';       // the version the page last reloaded to load, and when
 const FIRE_GAP = 1 / 30;  // seconds per tick of the rules: each pad sends at most one shot a tick, and a
-                          // shot lands R.FLIGHT ticks after it leaves (js/logic.js)
-const FAST = 3;           // how much faster the rules and shots run while there is nothing to send
-const LAND = 5;           // ticks (about 150 ms) a crew member takes to land on its pad before its first shot
+                          // shot lands R.FLIGHT ticks after it leaves (js/logic.js). R.pace() says when
+                          // the ticks run R.FAST times as fast.
+const LAND = 5;           // ticks (about 167 ms) a crew member takes to land on its pad before its first shot
 const NEXT_AFTER = 1700;  // milliseconds of confetti before the next level starts
 const HOLD_MS = 300;      // a touch held this long on a front shows what sending it would do, and sends nobody
+const RETRY_MS = 60000;   // a reload that came back as the old version is tried again after this long
 const LAST = LEVELS.length - 1;
-const TEACH_UNTIL = 2;    // levels 1 to 3 teach the first send and show the finishes-or-parks mark all the time
+const TEACH_UNTIL = 2;    // levels 1 to 3 teach the first send and always show the forecast under each front
 const BUILD = document.querySelector('meta[name="build"]')?.content || 'dev';
 const ALL = (2 ** LEVELS.length) - 1;
 const bit = n => 2 ** n;
@@ -66,7 +67,9 @@ let padEls = [], fronts = [];
 let previewOf = -1;          // the line whose preview is open, -1 when none
 let newBuild = '';           // a new version of the game is live and every file of it is fetched; it loads at the next level boundary
 let dragged = 0;             // how far the last press on the sculpture moved, in pixels
-let speed = 1;               // 1, or FAST while there is nothing to send
+let speed = 1;               // 1, or R.FAST (R.pace in js/logic.js)
+let quiet = 0;               // real seconds since a finger or the mouse last went down or up, or a key was pressed
+const pressed = new Set();   // the pointers down now: while one is, the ticks never speed up for quiet
 let clearedMask = Number(store.get(CLEARED_KEY)) || 0; // kept here too, so a visit with storage blocked still counts
 let cleanMask = Number(store.get(CLEAN_KEY)) || 0;
 let allCleared = Number(store.get(DONE_KEY)) || 0;
@@ -86,15 +89,20 @@ const crewName = s => (s.hidden ? 'a hidden crew member' : `${names()[s.color]} 
 // and undo, when the page is hidden or closed, and when the player moves to another level.
 // R.Attempt.restore plays the sends again with the game's own ticks up to that tick. A save that
 // does not fit the level any more (it was changed, or the rules) starts the level again and says so.
+// The game also keeps each level's attempt in memory for the visit (`kept`), so the arrows bring
+// a level back as it was left even when storage is blocked or full.
 const printOf = n => `${levelPrint(n)}:${LAND}`;
+const kept = new Map(); // level -> its attempt as it was left, this visit
 function saveAttempt() {
   if (!att || (state !== 'play' && state !== 'jam')) return;
-  if (!att.sends.length && !att.undos) store.remove(ATTEMPT_KEY(current));
-  else store.set(ATTEMPT_KEY(current), JSON.stringify({ fp: printOf(current), ...att.save() }));
+  if (!att.sends.length && !att.undos) { kept.delete(current); store.remove(ATTEMPT_KEY(current)); }
+  else { kept.set(current, att); store.set(ATTEMPT_KEY(current), JSON.stringify({ fp: printOf(current), ...att.save() })); }
 }
-// Level n's attempt played back to the moment it was left; 'changed' when there was one that no
-// longer fits (it is removed); null when there is none.
+function forgetAttempt(n) { kept.delete(n); store.remove(ATTEMPT_KEY(n)); }
+// Level n's attempt as it was left (from memory, else played back from storage); 'changed' when
+// the stored one no longer fits (it is removed); null when there is none.
 function savedAttempt(n) {
+  if (kept.has(n)) return kept.get(n);
   const text = store.get(ATTEMPT_KEY(n));
   if (!text) return null;
   try {
@@ -105,15 +113,16 @@ function savedAttempt(n) {
   store.remove(ATTEMPT_KEY(n));
   return 'changed';
 }
-// The game used to keep one attempt for whichever level was being played. It becomes that level's
-// save; restore() still checks every send of it.
+// The game used to keep one attempt for whichever level was being played, with no fingerprint of
+// its sculpture or of the rules, so nothing can show it still fits: that level starts again and
+// says "Level changed. Restarted." the first time it is opened (a save with no fingerprint is
+// turned down like any other that does not fit).
 try {
   const old = JSON.parse(store.get(OLD_ATTEMPT_KEY));
   store.remove(OLD_ATTEMPT_KEY);
   const n = old && old.level;
-  const last = Array.isArray(old?.checks) ? old.checks[old.checks.length - 1] : null;
-  if (Number.isInteger(n) && n >= 0 && n <= LAST && old.def === JSON.stringify(LEVELS[n]) && Array.isArray(last) && !store.get(ATTEMPT_KEY(n))) {
-    store.set(ATTEMPT_KEY(n), JSON.stringify({ fp: printOf(n), sends: old.sends, checks: old.checks, undos: 0, at: last[0], end: last }));
+  if (Number.isInteger(n) && n >= 0 && n <= LAST && Array.isArray(old.sends) && old.sends.length && !store.get(ATTEMPT_KEY(n))) {
+    store.set(ATTEMPT_KEY(n), JSON.stringify({ fp: 'old' }));
   }
 } catch { /* nothing kept, or nothing usable */ }
 
@@ -137,8 +146,8 @@ function start(n, fresh = false) {
   n = Math.round(Number(n));
   n = Number.isFinite(n) ? ((n % LEVELS.length) + LEVELS.length) % LEVELS.length : 0; // the arrows wrap around
   if (att && n !== current) saveAttempt(); // the level being left is kept as it is now
-  if (fresh) store.remove(ATTEMPT_KEY(n));
-  if (newBuild) return reloadAt(n); // a level boundary: the new version loads now
+  if (fresh) forgetAttempt(n);
+  if (newBuild) return reloadAt(n); // a level boundary: the new version loads now (and nothing more is saved)
   gen++;
   current = n;
   syncAddress(store.set(SAVE_KEY, current) && store.get(SAVE_KEY) === String(current));
@@ -315,10 +324,10 @@ function renderPad(i, fromRect) {
 }
 
 // A pad's name for a screen reader: empty, or who is on it, whether it is firing or waiting, and
-// whether it will park if nobody else is sent.
+// whether it will park if no more crew are sent.
 function padLabel(i, awake = null, parks = 0) {
   const s = st.slots[i];
-  padEls[i].setAttribute('aria-label', `Pad ${i + 1}: ` + (!s ? 'empty' : `${crewName(s)}, ${awake === false ? 'asleep, waiting for its colour' : 'firing'}${parks ? `, parks ${parks} alone` : ''}`));
+  padEls[i].setAttribute('aria-label', `Pad ${i + 1}: ` + (!s ? 'empty' : `${crewName(s)}, ${awake === false ? 'asleep, waiting for its colour' : 'firing'}${parks ? `, parks ${parks} if no more crew are sent` : ''}`));
 }
 
 // The flight up to the pad moves the crew member as a whole; the recoil of each shot squashes
@@ -370,21 +379,26 @@ function announce(text) {
 // something to hit or a shot of its own in the air; otherwise it is asleep and its pad shows it
 // is waiting.
 //
-// What sending a front now would do (R.forecast, the rules run on a copy of the board, as if
-// nobody else were sent after it): it finishes alone and frees its pad (a tick), or it parks with
-// N still to fire ("parks N"). Levels 1 to 3 show it under every front all the time; from level 4
-// it shows only while the front is held (HOLD_MS), hovered with a mouse or has keyboard focus,
-// worded "finishes alone" or "parks N alone". A screen reader hears it in the front's name.
-// Worked out only when asked for and kept until the board changes (`rev`: a send, an undo, a
-// shot leaving or landing, a crew member landing), never for shots merely flying.
+// What sending a front now would do (R.forecast, the rules run on a copy of the board, if no more
+// crew are sent after it): it finishes and frees its pad, or it parks with N still to fire; and it
+// may strand crew already on a pad, which would have finished without it and park instead. Under
+// the front: a tick (finishes, strands nobody), "parks N", or "strands" (it finishes but leaves
+// someone parked). In words, above the front while it is held (HOLD_MS), hovered with a mouse or
+// has keyboard focus: "finishes; strands red 12" over "if no more crew are sent". A screen reader
+// hears the words in the front's name. The marks show on levels 1 to 3, and on every level until
+// the player has held a front once (marksShown); after that, from level 4, only the words, when
+// asked. Worked out only when asked for and kept until the board changes (`rev`: a send, an undo, a
+// shot leaving or landing, a crew member landing) or, while shots are in the air, the next tick
+// (a send lands before or after a shot opens a cube), so what shows is right when it shows.
 //
 // A crew member already on a pad shows "parks N" as soon as a send has made it certain to park
 // (R.fates: the board run on until nothing moves, once per send or undo, since nothing else
-// changes where it is going).
-let rev = 0, fcRev = -1, fates = new Map();
+// changes where it is going; it is also what R.forecast compares with to find who a send strands).
+let rev = 0, fcAt = '', fates = new Map();
 const fcKinds = new Map(); // crew of the same colour and number fare the same
 let inspecting = -1;       // the line whose front shows its forecast now, -1 when none
-const marksShown = () => current <= TEACH_UNTIL;
+const marksShown = () => current <= TEACH_UNTIL || !(taught & HOLD);
+const fcStamp = () => (st.flying.length ? `${rev}@${st.tick}` : `${rev}`);
 
 function boardChanged(sent) {
   rev++;
@@ -393,21 +407,25 @@ function boardChanged(sent) {
 function forecastFor(ci) {
   const s = st.columns[ci]?.[0];
   if (!s || s.hidden || R.freeSlot(st) < 0) return null;
-  if (fcRev !== rev) { fcKinds.clear(); fcRev = rev; }
+  const at = fcStamp();
+  if (fcAt !== at) { fcKinds.clear(); fcAt = at; }
   const k = `${s.color}:${s.count}`;
-  if (!fcKinds.has(k)) fcKinds.set(k, R.forecast(st, ci, LAND));
+  if (!fcKinds.has(k)) fcKinds.set(k, R.forecast(st, ci, LAND, fates));
   return fcKinds.get(k);
 }
-const fcWords = f => (!f ? 'no free pad' : f.finishes ? 'finishes alone' : `parks ${f.left} alone`);
+const IF_NONE = 'if no more crew are sent';
+const cleanSend = f => !!f && f.finishes && !f.strands.length; // finishes and strands nobody: the tick
+const fcHead = f => (!f ? 'no free pad' : (f.finishes ? 'finishes' : `parks ${f.left}`) + f.strands.map(s => `; strands ${names()[s.color]} ${s.left}`).join(''));
+const fcWords = f => (!f ? 'no free pad' : `${fcHead(f)}, ${IF_NONE}`);
 
-// The fronts' names for a screen reader, with what sending each would do. From level 4 they are
-// brought up to date at most twice a second (and at once after a send or undo or on focus), so
-// the forecasts run on demand, not on every tick.
-let labelRev = -1, labelAt = 0;
+// The fronts' names for a screen reader, with what sending each would do. Once the marks are off
+// they are brought up to date at most twice a second (and at once after a send or undo or on
+// focus), so the forecasts run on demand, not on every tick.
+let labelAt = '', labelMs = 0;
 function labelFronts(now = false) {
   const t = performance.now();
-  if (!now && (labelRev === rev || (!marksShown() && t - labelAt < 500))) return;
-  labelRev = rev; labelAt = t;
+  if (!now && (labelAt === fcStamp() || (!marksShown() && t - labelMs < 500))) return;
+  labelAt = fcStamp(); labelMs = t;
   fronts.forEach((el, ci) => {
     const s = st.columns[ci]?.[0];
     if (!el || !s) return;
@@ -418,29 +436,30 @@ function labelFronts(now = false) {
 }
 
 function showReach() {
+  const marks = marksShown();
   fronts.forEach((el, ci) => {
     const s = st.columns[ci]?.[0];
     if (!el || !s) return;
     const ready = st.exposed[s.color].size > 0;
     const open = ci === inspecting;
-    const f = marksShown() || open ? forecastFor(ci) : undefined;
-    const key = `${ready}|${f === undefined ? '' : f ? (f.finishes ? 'done' : f.left) : 'full'}|${open}`;
+    const f = marks || open ? forecastFor(ci) : undefined;
+    const key = `${ready}|${f === undefined ? '' : R.forecastKey(f)}|${open}|${marks}`;
     if (el._key === key) return;
     el._key = key;
     el.classList.toggle('ready', ready);
     el.classList.toggle('covered', !ready);
     const fc = el.querySelector('.fc');
-    fc.hidden = !marksShown() || !f;
+    fc.hidden = !marks || !f;
     if (!fc.hidden) {
-      fc.className = f.finishes ? 'fc done' : 'fc park';
-      fc.innerHTML = f.finishes ? TICK : `parks ${f.left}`;
+      fc.className = cleanSend(f) ? 'fc done' : 'fc park';
+      fc.innerHTML = cleanSend(f) ? TICK : f.finishes ? 'strands' : `parks ${f.left}`;
     }
     const tip = el.parentNode.querySelector('.tip');
     tip.hidden = !open;
     el.parentNode.parentNode.classList.toggle('open', open);
     if (open) {
-      tip.className = `tip ${f && f.finishes ? 'done' : 'park'}`;
-      tip.innerHTML = f && f.finishes ? `${TICK}finishes alone` : fcWords(f);
+      tip.className = `tip ${cleanSend(f) ? 'done' : 'park'}`;
+      tip.innerHTML = `<b>${cleanSend(f) ? TICK : ''}${fcHead(f)}</b>${f ? `<small>${IF_NONE}</small>` : ''}`;
       tip.style.marginLeft = '0px'; // kept inside the window beside the first and last lines
       const r = tip.getBoundingClientRect();
       tip.style.marginLeft = `${Math.max(0, 6 - r.left) - Math.max(0, r.right - (innerWidth - 6))}px`;
@@ -473,12 +492,25 @@ function showReach() {
   quietPads = false;
 }
 
-// Shows what sending line ci would do on its front (-1: on none).
-function inspect(ci) {
+// Shows what sending line ci would do on its front (-1: on none). `hold` when a touch held it: that
+// is the player using the preview, so the marks can go (HOLD). A mouse over a front or keyboard
+// focus on it counts too once the words have been up HOLD_MS.
+let seenTimer = 0;
+function inspect(ci, hold = false) {
   if (ci >= 0 && (state !== 'play' && state !== 'jam')) ci = -1;
+  clearTimeout(seenTimer);
+  if (ci >= 0 && !(taught & HOLD)) {
+    if (hold) learnHold();
+    else seenTimer = setTimeout(() => { if (inspecting === ci) learnHold(); }, HOLD_MS);
+  }
   if (ci === inspecting) return;
   inspecting = ci;
   if (st) showReach();
+}
+function learnHold() {
+  if (taught & HOLD) return;
+  learn(HOLD);
+  if (st) { showReach(); teach(); }
 }
 
 // A front: a tap, a click, Enter or Space sends it at once. A touch held HOLD_MS shows its
@@ -490,7 +522,7 @@ function frontEvents(slot, ci) {
     held = false;
     clearTimeout(holdTimer);
     if (e.pointerType === 'mouse') return;
-    holdTimer = setTimeout(() => { held = true; inspect(ci); }, HOLD_MS);
+    holdTimer = setTimeout(() => { held = true; inspect(ci, true); }, HOLD_MS);
   });
   const lift = () => {
     clearTimeout(holdTimer);
@@ -512,48 +544,66 @@ function frontEvents(slot, ci) {
 
 // ---------- the lessons, one line at a time ----------
 // "Tap the front crew" on levels 1 to 3, until a crew member has been sent. On level 1, just after
-// that, what the tick means, for LESSON_MS. And on any level, the first time a crew member sleeps
-// on a pad (for half a second, not just between two shots), what that means, until that crew
-// member wakes (seen by the rules: it fires a shot) and at least LESSON_MS. A lesson that has been
-// on screen LESSON_MS counts as seen even when an undo or a restart cuts it short.
-const SENT = 1, PARK = 2, TICK_SEEN = 4;
+// that, what the tick means, for LESSON_MS. On any level, the first time a crew member sleeps on a
+// pad (for half a second, not just between two shots), what that means, until that crew member
+// wakes (seen by the rules: it fires a shot) and it has been on screen at least LESSON_MS. And from
+// level 4, "Hold a front crew to preview. Tap to send." until the player has held a front once
+// (inspect): then the marks under the fronts go too. Only time on screen counts toward LESSON_MS:
+// not while the line is hidden (out of room, a win, the page in the background, a message over it).
+// A lesson that has been on screen LESSON_MS counts as seen even when an undo or a restart cuts it
+// short. The browser remembers each (TAUGHT_KEY).
+const SENT = 1, PARK = 2, TICK_SEEN = 4, HOLD = 8;
 const HINT_SEND = 'Tap the front crew';
-const HINT_TICK = `${TICK} means it finishes alone and frees its pad`;
+const HINT_TICK = `${TICK} it finishes and frees its pad, ${IF_NONE}`;
 const HINT_PARK = 'Sleeping crew keep a pad. Clear the cubes above their colour.';
+const HINT_HOLD = 'Hold a front crew to preview. Tap to send.';
 const LESSON_MS = 2500;
 let taught = Number(store.get(TAUGHT_KEY)) || 0;
 if (taught === 2) taught = SENT | PARK; // the old count: 2 meant both lessons seen
-let tickLesson = 0;   // when the tick lesson came up, 0 while it is not showing
-let lesson = null;    // the parking lesson showing: { id of its sleeper, when it came up, until (once it woke) }
+let tickShown = -1;   // ms the tick lesson has been on screen, -1 while it has not come up
+let lesson = null;    // the parking lesson: { id of its sleeper, ms on screen, whether it has woken }
+let hintOn = 0;       // when the line on screen was last counted, 0 while none is on screen
 function learn(what) { taught |= what; store.set(TAUGHT_KEY, taught); }
+// Adds the time the lesson line has been on screen since it was last counted to that lesson.
+function countHint(now) {
+  if (!hintOn) return;
+  const text = $('hint')._text;
+  if (text === HINT_TICK && tickShown >= 0) tickShown += now - hintOn;
+  if (text === HINT_PARK && lesson) lesson.shown += now - hintOn;
+  hintOn = now;
+}
 function lessonBreak() {
-  const now = performance.now();
-  if (lesson && now - lesson.at >= LESSON_MS) learn(PARK);
-  if (tickLesson && now - tickLesson >= LESSON_MS) learn(TICK_SEEN);
-  lesson = null; tickLesson = 0;
+  countHint(performance.now());
+  hintOn = 0;
+  if (lesson && lesson.shown >= LESSON_MS) learn(PARK);
+  if (tickShown >= LESSON_MS) learn(TICK_SEEN);
+  lesson = null; tickShown = -1;
 }
 function teach() {
   let text = '';
   const now = performance.now();
+  countHint(now);
   if (state === 'play') {
     if (current <= TEACH_UNTIL && !(taught & SENT) && !att.sends.length) text = HINT_SEND;
     else if (current === 0 && (taught & SENT) && !(taught & TICK_SEEN)) {
-      if (!tickLesson) tickLesson = now;
-      if (now - tickLesson < LESSON_MS) text = HINT_TICK;
-      else { learn(TICK_SEEN); tickLesson = 0; }
+      if (tickShown < 0) tickShown = 0;
+      if (tickShown < LESSON_MS) text = HINT_TICK;
+      else { learn(TICK_SEEN); tickShown = -1; }
     }
     if (!text && !(taught & PARK)) {
       if (!lesson) {
         const p = padState.find(p => p && p.who >= 0 && !p.awake && now - p.since >= 500);
-        if (p) lesson = { id: p.who, at: now, until: 0 };
+        if (p) lesson = { id: p.who, shown: 0, woke: false };
       }
-      if (lesson && lesson.until && now >= lesson.until) { learn(PARK); lesson = null; }
+      if (lesson && lesson.woke && lesson.shown >= LESSON_MS) { learn(PARK); lesson = null; }
       if (lesson) text = HINT_PARK;
     }
+    if (!text && current > TEACH_UNTIL && !(taught & HOLD)) text = HINT_HOLD;
   }
   const h = $('hint');
   if (h._text !== text) { h._text = text; h.innerHTML = text; }
-  h.hidden = !text;
+  h.hidden = !text || !$('banner').hidden; // a message ("Level changed. Restarted.") goes first
+  hintOn = !h.hidden && document.visibilityState === 'visible' ? now : 0;
 }
 
 // ---------- the one thing the player does: send the front of a line up to a pad ----------
@@ -600,22 +650,25 @@ function undo() {
 // ---------- the loop ----------
 // The rules run in ticks of FIRE_GAP (R.tickGame in js/logic.js): the shots that are due land, then
 // every pad that can fire sends one. The screen only draws what each tick did, on the same clock.
-// While the player has nothing to send (every pad taken, or every line empty) the rules and the
-// shots run FAST times as fast, back to 1x the tick a send is possible again.
-const nothingToSend = () => R.freeSlot(st) < 0 || st.columns.every(c => !c.length);
+// Before every tick R.pace() says how fast it runs: R.FAST times as fast while there is nothing to
+// send (every pad taken, or every line empty) or nobody has touched the screen or a key for
+// R.IDLE_MS, back to 1x the moment a finger goes down (and while it stays down), and never faster
+// than 1x while a crew member is still landing on its pad. The test players keep the same clock
+// (tools/players.mjs).
 function tick(dt) {
   let left = dt; // real seconds of this frame still to run
+  const still = !pressed.size;
   for (;;) {
-    speed = nothingToSend() ? FAST : 1;
+    speed = R.pace(st, still ? quiet * 1000 : 0);
     const need = (FIRE_GAP - clock) / speed; // real seconds until the next tick
-    if (left < need) { clock += left * speed; break; }
-    left -= need; clock = 0;
+    if (left < need) { clock += left * speed; quiet += left; break; }
+    left -= need; quiet += need; clock = 0;
     const landing = st.slots.some(s => s && s.land > 0);
     const { landed, shots, gone } = R.tickGame(st);
     for (const shot of shots) launch(shot);
     if (landed.length) afterHit(landed, gone);
-    // What a send would do changes when a shot leaves or lands or a crew member lands; a shot
-    // that is only flying changes nothing a forecast can see.
+    // What a send would do changes when a shot leaves or lands or a crew member lands (and, while
+    // shots fly, with every tick: forecastFor keys on it).
     if (landed.length || shots.length || gone.length || landing) boardChanged(false);
   }
   showReach();
@@ -647,7 +700,7 @@ function launch({ slot, shooter, freed, flight }) {
     padState[slot] = { ...p, awake: true, since: performance.now() };
     announce(`${names()[shooter.color]} wakes on pad ${slot + 1}`);
   }
-  if (lesson && !lesson.until && lesson.id === shooter.id) lesson.until = Math.max(performance.now(), lesson.at + LESSON_MS);
+  if (lesson && lesson.id === shooter.id) lesson.woke = true;
   setCount(slot, shooter);
   recoil(slot);
   if (freed) leave(slot);
@@ -712,12 +765,12 @@ function win() {
   const clean = att.undos === 0;
   $('undo').disabled = true;
   closePreview(); inspect(-1); teach();
-  store.remove(ATTEMPT_KEY(current));
+  forgetAttempt(current);
   clearedMask |= bit(current);
   store.set(CLEARED_KEY, clearedMask);
   if (clean) { cleanMask |= bit(current); store.set(CLEAN_KEY, cleanMask); showStar(); }
   stage.finale(); fx.party(); buzz.tick(0);
-  if (current === LAST || (clearedMask & ALL) === ALL) return ending(clean);
+  if (current === LAST || (clearedMask & ALL) === ALL) return ending();
   store.set(SAVE_KEY, current + 1); // a page stopped during the confetti comes back on the next level
   sound.win();
   say(`${LEVELS[current].name} popped!${clean ? ' Clean clear' : ''}`, 0);
@@ -727,8 +780,10 @@ function win() {
 
 // The ending stays, with confetti now and then, until a tap starts level 1. It says "All 20
 // cleared", and counts one more full clear, when every level has been won since the last full
-// clear; reaching level 20 without that (the arrows, the address) is "Level 20 cleared".
-function ending(clean) {
+// clear; reaching level 20 without that (the arrows, the address) is "Level 20 cleared". Under it,
+// how many levels have their clean-clear star ("7 of 20 clean clears"), or "All 20 clean" once
+// every one has.
+function ending() {
   state = 'done';
   const full = (clearedMask & ALL) === ALL;
   if (full) {
@@ -741,7 +796,8 @@ function ending(clean) {
   sound.allClear();
   say('', 0);
   $('ending-title').textContent = full ? `All ${LEVELS.length} cleared` : `Level ${LEVELS.length} cleared`;
-  $('ending-sub').textContent = clean ? 'Clean clear. Tap to play again' : 'Tap to play again';
+  const stars = LEVELS.filter((_, n) => cleanMask & bit(n)).length;
+  $('ending-sub').textContent = `${stars === LEVELS.length ? `All ${stars} clean` : `${stars} of ${LEVELS.length} clean clears`}. Tap to play again`;
   $('ending').hidden = false;
   const g = gen;
   const more = () => {
@@ -791,8 +847,14 @@ window.addEventListener('click', e => {
 }, true);
 window.addEventListener('keydown', e => { if (e.key === 'Escape') closePreview(); });
 // Every new press starts clean: a hold whose click never came (some browsers drop it after a long
-// press) must not swallow the next tap, wherever it lands.
-window.addEventListener('pointerdown', () => { held = false; }, true);
+// press) must not swallow the next tap, wherever it lands. Every press, lift and key is also the
+// player moving, which brings the ticks back to 1x (R.pace): while a finger is down they stay there.
+window.addEventListener('pointerdown', e => { held = false; pressed.add(e.pointerId); quiet = 0; }, true);
+const lifted = e => { pressed.delete(e.pointerId); quiet = 0; };
+window.addEventListener('pointerup', lifted, true);
+window.addEventListener('pointercancel', lifted, true);
+window.addEventListener('keydown', () => { quiet = 0; }, true);
+window.addEventListener('blur', () => pressed.clear()); // a lift that will never come
 
 let last = performance.now();
 function frame(now) {
@@ -824,7 +886,9 @@ function say(text, ms) {
 const FRESH = ['css/game.css', 'js/main.js', 'js/render.js', 'js/fx.js', 'js/audio.js', 'js/levels.js', 'js/logic.js', 'js/models.js',
   'vendor/three.module.js', 'vendor/three.core.js', 'vendor/RoundedBoxGeometry.js'];
 let checking = false;
-if (store.get(UPDATE_KEY) === BUILD) store.remove(UPDATE_KEY); // that reload worked
+// The version the page last reloaded to load, and when: "abc1234@1762850000000".
+const lastReload = () => { const [build, at] = String(store.get(UPDATE_KEY) || '').split('@'); return { build, at: Number(at) || 0 }; };
+if (lastReload().build === BUILD) store.remove(UPDATE_KEY); // that reload worked
 async function checkForUpdate() {
   if (BUILD === 'dev' || newBuild || checking) return;
   checking = true;
@@ -833,8 +897,10 @@ async function checkForUpdate() {
     if (!page.ok) return;
     const live = /<meta name="build" content="([^"]*)"/.exec(await page.text())?.[1];
     if (!live || live === BUILD || live === 'dev') return;
-    // The page reloaded once for this version and still came back old: wait for the cache to let go.
-    if (store.get(UPDATE_KEY) === live) return;
+    // The page reloaded for this version under a minute ago and still came back old: give the cache
+    // time to let go, then try again (the next check after that, at a level boundary as always).
+    const was = lastReload();
+    if (was.build === live && Math.abs(Date.now() - was.at) < RETRY_MS) return;
     const got = await Promise.all(FRESH.map(f => fetch(f, { cache: 'reload' }).then(r => r.ok && r.arrayBuffer().then(() => true), () => false)));
     if (!got.every(Boolean)) return; // a file did not come: no mix of old and new, try again later
     newBuild = live;
@@ -842,9 +908,12 @@ async function checkForUpdate() {
     else if (state === 'play' && !att.sends.length && !att.undos) reloadAt(current);
   } catch { /* offline: next time */ } finally { checking = false; }
 }
+// The page is left for the new version: from here on nothing plays and nothing is saved, so a
+// restart that has just forgotten its attempt is not saved again as the page goes.
 function reloadAt(n) {
+  state = 'gone';
   store.set(SAVE_KEY, n);
-  store.set(UPDATE_KEY, newBuild);
+  store.set(UPDATE_KEY, `${newBuild}@${Date.now()}`);
   const u = new URL(location.href);
   u.searchParams.delete('level'); // the saved level decides, so a page iOS stops later comes back right
   if (store.get(SAVE_KEY) !== String(n)) u.searchParams.set('level', n + 1); // storage blocked
@@ -852,7 +921,7 @@ function reloadAt(n) {
 }
 document.addEventListener('visibilitychange', () => {
   if (document.visibilityState === 'visible') checkForUpdate();
-  else saveAttempt(); // iOS may stop the page from here on: keep the board as it is now
+  else { saveAttempt(); pressed.clear(); if (st) teach(); } // iOS may stop the page from here on: keep the board as it is; a lesson stops counting
 });
 window.addEventListener('pagehide', () => saveAttempt());
 window.addEventListener('pageshow', e => { if (e.persisted) checkForUpdate(); });
@@ -909,12 +978,13 @@ requestAnimationFrame(frame);
 // storage working: it is what stops a reload that keeps coming back old from trying again.
 if (store.get(SAVE_KEY) === String(current)) setTimeout(checkForUpdate, 1500);
 
-// For the automated checks: a small window onto the game. state is 'play', 'won', 'jam' or
-// 'done' (the ending); allCleared is how many times every level was cleared. sends is how many
-// sends there are to take back, undos how many were taken back in this attempt, clean whether
-// this level has been cleared clean, speed 1 or FAST. snapshot() is the board in plain text, drawn
-// what the screen draws (shots in the air, cubes standing). start(n) starts level n from scratch
-// (as the level's name does); send(line) and undo() are the player's two moves.
+// For the automated checks: a small window onto the game. state is 'play', 'won', 'jam', 'done'
+// (the ending) or 'gone' (a new version is loading); allCleared is how many times every level was
+// cleared. sends is how many sends there are to take back, undos how many were taken back in this
+// attempt, clean whether this level has been cleared clean, speed 1 or R.FAST (R.pace).
+// snapshot() is the board in plain text, drawn what the screen draws (shots in the air, cubes
+// standing). start(n) starts level n from scratch (as the level's name does); send(line) and
+// undo() are the player's two moves.
 function snapshot() {
   return {
     state, level: current, tick: st.tick, cleared: st.cleared, hash: `${st.h1},${st.h2}`,
