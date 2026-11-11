@@ -101,6 +101,9 @@ function duck() {
     s.paint((x, y, z) => sq(x - e[0]) + sq(y - e[1]) + sq(z - e[2]) <= sq(0.95), 'charcoal');
   }
   s.paint((x, y, z) => Math.abs(z - cz) >= 3.2 && y >= 3 && y <= 5 && x >= 4 && x <= 9, 'orange');
+  // Bath foam over its back: the yellow under it waits until the foam is popped (level 2 teaches that).
+  const back = (x, z) => sq(x - 6.6) / sq(5.4) + sq(z - cz) / sq(4.0) <= 1 && x <= 8.5;
+  s.paint((x, y, z) => y >= 2 && back(x, z) && !s.get(x, y + 1, z), 'white');
   return s.done();
 }
 
@@ -152,6 +155,9 @@ function penguin() {
     s.fill((x, y, z) => y >= 4 && y <= 9 && sq(x - cx - side * 5.2) + sq(z - cz) <= sq(1.2) && Math.abs(x - cx) > 4.4, 'charcoal');
     s.fill((x, y, z) => y === 0 && sq(x - cx - side * 1.8) + sq(z - cz - 1.8) <= sq(1.6), 'orange');
   }
+  // A red scarf round its neck: the head above it and the body below wait on each other (level 3).
+  const ring = (x, z, a, b) => sq(x - cx) / sq(a) + sq(z - cz) / sq(b) <= 1;
+  s.fill((x, y, z) => y >= 8 && y <= 9 && ring(x, z, 5.6, 5.2) && !ring(x, z, 3.0, 2.6), 'red');
   s.fill((x, y, z) => y >= 9 && y <= 10 && Math.abs(x - cx) <= 0.6 && z > cz + 3 && z <= cz + 6, 'orange');
   // a big heart inside
   s.paint((x, y, z) => {
@@ -382,14 +388,14 @@ function tree() {
 }
 
 function melon() {
-  const s = new Sculpt(15, 15, 15);
-  const c = 7;
+  const s = new Sculpt(11, 11, 11); // a small one: level 17 is a breather between two big ones
+  const c = 5;
   s.each((x, y, z) => {
     const d = Math.hypot(x - c, y - c, z - c);
-    if (d > 7.2) return undefined;
+    if (d > 5.3) return undefined;
     if (x > c && y > c && z > c) return undefined; // one slice is already cut out, so the inside shows
-    if (d > 6.2) return 'green';
-    if (d > 5.3) return 'white';
+    if (d > 4.3) return 'green';
+    if (d > 3.5) return 'white';
     return hash(x, y, z) < 0.07 ? 'charcoal' : 'red';
   });
   return s.done();
