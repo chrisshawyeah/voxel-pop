@@ -135,7 +135,7 @@ export const journeys = [
               const open = st.exposed[c[0].color].size > 0;
               const mark = el?.querySelector(".fc") as HTMLElement | null;
               const label = el?.parentElement?.getAttribute("aria-label") || "";
-              const ok = el && el.classList.contains(open ? "ready" : "covered") && mark && !mark.hidden && /if no more crew are sent/.test(label);
+              const ok = el && el.classList.contains(open ? "ready" : "covered") && mark && !mark.hidden && /with no more sends/.test(label);
               return ok ? [] : [i + 1];
             });
           });
@@ -231,9 +231,9 @@ export const journeys = [
             const t = document.querySelector("#queues .front .tip:not([hidden])") as HTMLElement | null;
             return { text: t?.textContent || "", label: document.querySelector("#queues .col button.front")?.getAttribute("aria-label") || "" };
           });
-          const words = /^(no free pad|(finishes|parks \d+)(; strands \w+ \d+)*if no more crew are sent)$/;
+          const words = /^(no free pad|(finishes|parks \d+)(; strands \w+ \d+)*with no more sends)$/;
           if (!words.test(tip.text)) throw new Error(`hovering a front shows "${tip.text}"`);
-          if (!/(finishes|parks \d+)(; strands \w+ \d+)*, if no more crew are sent|no free pad/.test(tip.label)) throw new Error(`the front's name does not say what sending it would do: "${tip.label}"`);
+          if (!/(finishes|parks \d+)(; strands \w+ \d+)*, with no more sends|no free pad/.test(tip.label)) throw new Error(`the front's name does not say what sending it would do: "${tip.label}"`);
           await ctx.page.mouse.move(5, 5);
           await ctx.page.waitForTimeout(200);
           const after = await ctx.page.evaluate(() => ({

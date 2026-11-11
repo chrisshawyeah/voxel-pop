@@ -383,7 +383,8 @@ function announce(text) {
 // may strand crew already on a pad, which would have finished without it and park instead. Under
 // the front: a tick (finishes, strands nobody), "parks N", or "strands" (it finishes but leaves
 // someone parked). In words, above the front while it is held (HOLD_MS), hovered with a mouse or
-// has keyboard focus: "finishes; strands red 12" over "if no more crew are sent". A screen reader
+// has keyboard focus: "finishes; strands red 12" over "with no more sends", wrapped to fit the
+// window however many crew it strands (css/game.css .tip). A screen reader
 // hears the words in the front's name. The marks show on levels 1 to 3, and on every level until
 // the player has held a front once (marksShown); after that, from level 4, only the words, when
 // asked. Worked out only when asked for and kept until the board changes (`rev`: a send, an undo, a
@@ -412,7 +413,7 @@ function forecastFor(ci) {
   if (!fcKinds.has(k)) fcKinds.set(k, R.forecast(st, ci, LAND, fates));
   return fcKinds.get(k);
 }
-const IF_NONE = 'if no more crew are sent';
+const IF_NONE = 'with no more sends';
 const cleanSend = f => !!f && f.finishes && !f.strands.length; // finishes and strands nobody: the tick
 const fcHead = f => (!f ? 'no free pad' : (f.finishes ? 'finishes' : `parks ${f.left}`) + f.strands.map(s => `; strands ${names()[s.color]} ${s.left}`).join(''));
 const fcWords = f => (!f ? 'no free pad' : `${fcHead(f)}, ${IF_NONE}`);

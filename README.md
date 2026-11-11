@@ -27,10 +27,11 @@ to fire, and it may *strand* crew already on a pad: ones that would have finishe
 send and now park ("finishes; strands red 12": the red crew member on a pad would be left with 12).
 Under every front it shows as a tick (finishes and strands nobody), "parks 23", or "strands" (it
 finishes, but leaves someone parked), the last two in a dashed box like a waiting pad. In words,
-"finishes; strands red 12" over "if no more crew are sent", it appears above a front while the
+"finishes; strands red 12" over "with no more sends", it appears above a front while the
 front is pressed and held (300 ms; that press sends nobody, a quick tap still sends at once),
 while a mouse is over it, or while it has keyboard focus; screen readers hear it in the front's
-name. It is worked out again whenever the board changes and, while shots are in the air, on every
+name. It wraps to stay on the screen however many crew a send strands. It is worked out again
+whenever the board changes and, while shots are in the air, on every
 tick, so it is right the moment it shows. It is hidden while every pad is taken ("no free pad"
 when asked). Levels 1 to 3 always show the marks under the fronts. From level 4 they show too, with
 the line "Hold a front crew to preview. Tap to send.", until the player has held a front (or kept

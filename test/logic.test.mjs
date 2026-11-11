@@ -503,6 +503,20 @@ test('the hold lesson is learned only from a forecast really shown', () => {
   assert.equal(learned({}, (inspect, env) => { inspect(0); inspect(-1); env.later(); }), 0, 'nor one left before 300 ms');
 });
 
+test('the forecast in words wraps to fit a phone, under a short condition', () => {
+  // A send can strand several crew ("parks 19; strands white 1; strands white 12; ..."): the tip
+  // wraps and is never wider than the window less 6 px a side, so the script that keeps it inside
+  // the window (showReach in js/main.js) always can.
+  const css = readFileSync(new URL('../css/game.css', import.meta.url), 'utf8');
+  const rule = sel => css.match(new RegExp(`^${sel.replace(/\./g, '\\.')} \\{([^}]*)\\}`, 'm'))[1];
+  assert.match(rule('.tip'), /width: max-content;/);
+  assert.match(rule('.tip'), /max-width: calc\(100vw - 12px\);/);
+  assert.match(rule('.tip'), /white-space: normal;/);
+  for (const sel of ['.tip', '.tip b', '.tip small']) assert.doesNotMatch(rule(sel), /nowrap/, `${sel} may wrap`);
+  assert.match(mainSrc, /tip\.style\.marginLeft = `\$\{Math\.max\(0, 6 - r\.left\) - Math\.max\(0, r\.right - \(innerWidth - 6\)\)\}px`/, 'and is moved inside the window');
+  assert.equal(mainPart('IF_NONE'), "const IF_NONE = 'with no more sends';");
+});
+
 test('the forecast follower wins less without undo than with it, and its undos are counted', () => {
   const n = LEVELS.findIndex((_, k) => k >= 8 && forecastCheck(buildLevel(k).board).rate < 60);
   assert.ok(n >= 0, 'some late level beats the mark follower more often than not');
