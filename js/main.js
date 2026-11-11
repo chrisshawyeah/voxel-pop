@@ -68,8 +68,7 @@ let previewOf = -1;          // the line whose preview is open, -1 when none
 let newBuild = '';           // a new version of the game is live and every file of it is fetched; it loads at the next level boundary
 let dragged = 0;             // how far the last press on the sculpture moved, in pixels
 let speed = 1;               // 1, or R.FAST (R.pace in js/logic.js)
-let quiet = 0;               // real seconds since a finger or the mouse last went down or up, or a key was pressed
-const pressed = new Set();   // the pointers down now: while one is, the ticks never speed up for quiet
+const pressed = new Set();   // the pointers down now: while one is, the ticks run at 1x (R.pace)
 let clearedMask = Number(store.get(CLEARED_KEY)) || 0; // kept here too, so a visit with storage blocked still counts
 let cleanMask = Number(store.get(CLEAN_KEY)) || 0;
 let allCleared = Number(store.get(DONE_KEY)) || 0;
@@ -384,7 +383,8 @@ function announce(text) {
 // may strand crew already on a pad, which would have finished without it and park instead. Under
 // the front: a tick (finishes, strands nobody), "parks N", or "strands" (it finishes but leaves
 // someone parked). In words, above the front while it is held (HOLD_MS), hovered with a mouse or
-// has keyboard focus: "finishes; strands red 12" over "if no more crew are sent". A screen reader
+// has keyboard focus: "finishes; strands red 12" over "with no more sends", wrapped to fit the
+// window however many crew it strands (css/game.css .tip). A screen reader
 // hears the words in the front's name. The marks show on levels 1 to 3, and on every level until
 // the player has held a front once (marksShown); after that, from level 4, only the words, when
 // asked. Worked out only when asked for and kept until the board changes (`rev`: a send, an undo, a
@@ -413,7 +413,7 @@ function forecastFor(ci) {
   if (!fcKinds.has(k)) fcKinds.set(k, R.forecast(st, ci, LAND, fates));
   return fcKinds.get(k);
 }
-const IF_NONE = 'if no more crew are sent';
+const IF_NONE = 'with no more sends';
 const cleanSend = f => !!f && f.finishes && !f.strands.length; // finishes and strands nobody: the tick
 const fcHead = f => (!f ? 'no free pad' : (f.finishes ? 'finishes' : `parks ${f.left}`) + f.strands.map(s => `; strands ${names()[s.color]} ${s.left}`).join(''));
 const fcWords = f => (!f ? 'no free pad' : `${fcHead(f)}, ${IF_NONE}`);
@@ -494,14 +494,17 @@ function showReach() {
 
 // Shows what sending line ci would do on its front (-1: on none). `hold` when a touch held it: that
 // is the player using the preview, so the marks can go (HOLD). A mouse over a front or keyboard
-// focus on it counts too once the words have been up HOLD_MS.
+// focus on it counts too once the words have been up HOLD_MS. Either counts only when it showed a
+// real forecast (realPreview): the page in view, a level being played and a free pad, so the words
+// said what the send would do, not "no free pad".
 let seenTimer = 0;
+const realPreview = ci => state === 'play' && document.visibilityState === 'visible' && forecastFor(ci) !== null;
 function inspect(ci, hold = false) {
   if (ci >= 0 && (state !== 'play' && state !== 'jam')) ci = -1;
   clearTimeout(seenTimer);
   if (ci >= 0 && !(taught & HOLD)) {
-    if (hold) learnHold();
-    else seenTimer = setTimeout(() => { if (inspecting === ci) learnHold(); }, HOLD_MS);
+    if (hold) { if (realPreview(ci)) learnHold(); }
+    else seenTimer = setTimeout(() => { if (inspecting === ci && realPreview(ci)) learnHold(); }, HOLD_MS);
   }
   if (ci === inspecting) return;
   inspecting = ci;
@@ -651,18 +654,16 @@ function undo() {
 // The rules run in ticks of FIRE_GAP (R.tickGame in js/logic.js): the shots that are due land, then
 // every pad that can fire sends one. The screen only draws what each tick did, on the same clock.
 // Before every tick R.pace() says how fast it runs: R.FAST times as fast while there is nothing to
-// send (every pad taken, or every line empty) or nobody has touched the screen or a key for
-// R.IDLE_MS, back to 1x the moment a finger goes down (and while it stays down), and never faster
-// than 1x while a crew member is still landing on its pad. The test players keep the same clock
-// (tools/players.mjs).
+// send (every pad taken, or every line empty), otherwise 1x however long the player thinks; 1x
+// while a finger is down, and never faster than 1x while a crew member is still landing on its
+// pad. The test players keep the same clock (tools/players.mjs).
 function tick(dt) {
   let left = dt; // real seconds of this frame still to run
-  const still = !pressed.size;
   for (;;) {
-    speed = R.pace(st, still ? quiet * 1000 : 0);
+    speed = R.pace(st, pressed.size > 0);
     const need = (FIRE_GAP - clock) / speed; // real seconds until the next tick
-    if (left < need) { clock += left * speed; quiet += left; break; }
-    left -= need; quiet += need; clock = 0;
+    if (left < need) { clock += left * speed; break; }
+    left -= need; clock = 0;
     const landing = st.slots.some(s => s && s.land > 0);
     const { landed, shots, gone } = R.tickGame(st);
     for (const shot of shots) launch(shot);
@@ -847,13 +848,12 @@ window.addEventListener('click', e => {
 }, true);
 window.addEventListener('keydown', e => { if (e.key === 'Escape') closePreview(); });
 // Every new press starts clean: a hold whose click never came (some browsers drop it after a long
-// press) must not swallow the next tap, wherever it lands. Every press, lift and key is also the
-// player moving, which brings the ticks back to 1x (R.pace): while a finger is down they stay there.
-window.addEventListener('pointerdown', e => { held = false; pressed.add(e.pointerId); quiet = 0; }, true);
-const lifted = e => { pressed.delete(e.pointerId); quiet = 0; };
+// press) must not swallow the next tap, wherever it lands. While a finger is down (holding a front,
+// turning the sculpture) the ticks run at 1x, even with every pad taken (R.pace).
+window.addEventListener('pointerdown', e => { held = false; pressed.add(e.pointerId); }, true);
+const lifted = e => { pressed.delete(e.pointerId); };
 window.addEventListener('pointerup', lifted, true);
 window.addEventListener('pointercancel', lifted, true);
-window.addEventListener('keydown', () => { quiet = 0; }, true);
 window.addEventListener('blur', () => pressed.clear()); // a lift that will never come
 
 let last = performance.now();

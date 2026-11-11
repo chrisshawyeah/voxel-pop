@@ -135,7 +135,7 @@ export const journeys = [
               const open = st.exposed[c[0].color].size > 0;
               const mark = el?.querySelector(".fc") as HTMLElement | null;
               const label = el?.parentElement?.getAttribute("aria-label") || "";
-              const ok = el && el.classList.contains(open ? "ready" : "covered") && mark && !mark.hidden && /if no more crew are sent/.test(label);
+              const ok = el && el.classList.contains(open ? "ready" : "covered") && mark && !mark.hidden && /with no more sends/.test(label);
               return ok ? [] : [i + 1];
             });
           });
@@ -231,9 +231,26 @@ export const journeys = [
             const t = document.querySelector("#queues .front .tip:not([hidden])") as HTMLElement | null;
             return { text: t?.textContent || "", label: document.querySelector("#queues .col button.front")?.getAttribute("aria-label") || "" };
           });
-          const words = /^(no free pad|(finishes|parks \d+)(; strands \w+ \d+)*if no more crew are sent)$/;
+          const words = /^(no free pad|(finishes|parks \d+)(; strands \w+ \d+)*with no more sends)$/;
           if (!words.test(tip.text)) throw new Error(`hovering a front shows "${tip.text}"`);
-          if (!/(finishes|parks \d+)(; strands \w+ \d+)*, if no more crew are sent|no free pad/.test(tip.label)) throw new Error(`the front's name does not say what sending it would do: "${tip.label}"`);
+          if (!/(finishes|parks \d+)(; strands \w+ \d+)*, with no more sends|no free pad/.test(tip.label)) throw new Error(`the front's name does not say what sending it would do: "${tip.label}"`);
+          // The longest forecast the levels can give (level 12 strands four crew, 78 characters) must
+          // wrap and stay inside the window, placed the way the game places it.
+          const fit = await ctx.page.evaluate(() => {
+            const t = document.querySelector("#queues .front .tip:not([hidden])") as HTMLElement;
+            const b = t.querySelector("b") as HTMLElement;
+            const html = b.innerHTML, was = t.style.marginLeft;
+            b.textContent = "parks 19; strands white 1; strands white 12; strands white 17; strands white 2";
+            t.style.marginLeft = "0px";
+            let r = t.getBoundingClientRect();
+            t.style.marginLeft = `${Math.max(0, 6 - r.left) - Math.max(0, r.right - (innerWidth - 6))}px`;
+            r = t.getBoundingClientRect();
+            const out = { left: Math.round(r.left), right: Math.round(r.right), top: Math.round(r.top), wide: innerWidth };
+            b.innerHTML = html;
+            t.style.marginLeft = was;
+            return out;
+          });
+          if (fit.left < 0 || fit.right > fit.wide || fit.top < 0) throw new Error(`a long forecast leaves the window: ${JSON.stringify(fit)}`);
           await ctx.page.mouse.move(5, 5);
           await ctx.page.waitForTimeout(200);
           const after = await ctx.page.evaluate(() => ({
@@ -382,9 +399,15 @@ export const journeys = [
       { click: "#again", caption: "Start it again" },
       { caption: "The level starts over", run: async (ctx: any) => { await whole(ctx.page, ctx.state.level as number, ctx.state.crew as number); } },
       {
-        caption: "Undo brings back popped cubes and shots in the air",
+        caption: "Undo while shots fly",
         run: async (ctx: any) => {
-          const end = Date.now() + 30_000;
+          // The moment is made, not waited for: level 1 opens two colours at once, so with one ready
+          // crew member sent, a cube pops while its shots still fly, another front is ready and a
+          // pad is free, within a second or two.
+          await ctx.page.evaluate(() => (window as any).crumble.start(0));
+          await whole(ctx.page, 0);
+          if (!(await send(ctx.page, "can-hit"))) throw new Error("level 1 has no ready crew member to send");
+          const end = Date.now() + 15_000;
           for (;;) {
             const ok = await ctx.page.evaluate(() => {
               const st = (window as any).crumble.board;
@@ -392,8 +415,8 @@ export const journeys = [
                 st.columns.some((c: any[]) => c.length && st.exposed[c[0].color].size > 0);
             });
             if (ok) break;
-            if (Date.now() > end) throw new Error("no moment with cubes popped, shots in the air and a ready crew member to send");
-            await ctx.page.waitForTimeout((await send(ctx.page, "can-hit")) ? 120 : 80);
+            if (Date.now() > end) throw new Error("level 1: no moment with cubes popped, shots in the air, a free pad and a ready crew member to send");
+            await ctx.page.waitForTimeout(50);
           }
           // The board is read and the send made in one go, so not a tick passes in between; the
           // same for the undo and the board it gives back.

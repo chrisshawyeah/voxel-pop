@@ -27,14 +27,16 @@ to fire, and it may *strand* crew already on a pad: ones that would have finishe
 send and now park ("finishes; strands red 12": the red crew member on a pad would be left with 12).
 Under every front it shows as a tick (finishes and strands nobody), "parks 23", or "strands" (it
 finishes, but leaves someone parked), the last two in a dashed box like a waiting pad. In words,
-"finishes; strands red 12" over "if no more crew are sent", it appears above a front while the
+"finishes; strands red 12" over "with no more sends", it appears above a front while the
 front is pressed and held (300 ms; that press sends nobody, a quick tap still sends at once),
 while a mouse is over it, or while it has keyboard focus; screen readers hear it in the front's
-name. It is worked out again whenever the board changes and, while shots are in the air, on every
+name. It wraps to stay on the screen however many crew a send strands. It is worked out again
+whenever the board changes and, while shots are in the air, on every
 tick, so it is right the moment it shows. It is hidden while every pad is taken ("no free pad"
 when asked). Levels 1 to 3 always show the marks under the fronts. From level 4 they show too, with
 the line "Hold a front crew to preview. Tap to send.", until the player has held a front (or kept
-a mouse or the keyboard on one) for 300 ms; from then on, from level 4, a front shows only ready or
+a mouse or the keyboard on one) for 300 ms while it showed a real forecast (the page in view and a
+pad free, not "no free pad"); from then on, from level 4, a front shows only ready or
 covered and the words come when asked. The browser remembers it (`crumble-crew.taught`), so a
 player who starts on a late level is taught the same way. A crew member already on a pad shows
 "parks 23" as soon as a later send has made it certain to park (`fates()` in `js/logic.js`).
@@ -53,12 +55,12 @@ until the first hold. Only time on screen counts toward the 2.5 seconds: not whi
 hidden (out of room, a win, a message over it, the page in the background). The browser
 remembers each once it has been seen (`crumble-crew.taught`).
 
-The rules and the shots run three times as fast while the player is only waiting: while there is
-nothing to send (every pad taken, or every line empty), and once nobody has touched the screen or
-a key for half a second, even with a pad free. They drop back to normal the moment a finger goes
-down (and stay there while it is down), and never run faster than normal while a crew member is
-still landing on its pad, so its flight up always ends before its first shot (`pace()` in
-`js/logic.js`).
+The rules and the shots run three times as fast only while there is nothing to send (every pad
+taken, or every line empty); with a pad free and crew in a line they run at normal speed however
+long the player takes to choose. They drop back to normal the moment a finger goes down (and stay
+there while it is down, even with every pad taken), and never run faster than normal while a crew
+member is still landing on its pad, so its flight up always ends before its first shot (`pace()`
+in `js/logic.js`).
 
 There are no coins, power-ups, menus or ads. Just 20 levels.
 
@@ -120,7 +122,7 @@ No build step and nothing to install. Every file is plain JavaScript the browser
 | The colours | `COLORS` at the top of `js/models.js`. No two colours in one sculpture should be easy to mix up, since crew are told apart by colour alone. |
 | The rules: what can be hit, which cube a shot takes, when you are out of room | `js/logic.js` |
 | What a win, a clean clear, a loss and the ending do, shot speed | `js/main.js` (`FIRE_GAP`, `LAND`, `NEXT_AFTER`, `win()`, `ending()`, `jam()`, `tick()`); how long a shot flies is `FLIGHT` in `js/logic.js` |
-| The 3x speed-up: when, and how fast | `pace()`, `FAST` and `IDLE_MS` in `js/logic.js` (the game and the timed test players both ask it before every tick) |
+| The 3x speed-up: when, and how fast | `pace()` and `FAST` in `js/logic.js` (the game and the timed test players both ask it before every tick) |
 | Undo, the undo count, and the attempt kept in storage | `Attempt` in `js/logic.js` (a copy of the board before each send; `save()` and `restore()`); `undo()`, `saveAttempt()`, `savedAttempt()` in `js/main.js`. Change `RULES` in `js/logic.js` when a rules change makes old saves wrong |
 | Ready and covered fronts, asleep crew, the forecast marks and words, press and hold, the progress bar | `showReach()`, `forecastFor()`, `frontEvents()`, `inspect()` and `progress()` in `js/main.js` (`HOLD_MS`; `marksShown()`: levels up to `TEACH_UNTIL` always, the rest until the first hold); the forecast itself, strands and all, is `forecast()` and `fates()` in `js/logic.js`; their look in `css/game.css` |
 | The line preview, the lessons, the star | `preview()`, `teach()` and `showStar()` in `js/main.js` |
@@ -140,7 +142,8 @@ knowing only what the screen shows (every line, through the preview, and a "?" a
 it reaches the front), and a *greedy* player that sends any crew member that can shoot right
 now. A level is right when the planning player wins it with a line that also wins when the
 sends overlap in time (played 0, 150, 300 and 600 ms apart with the game's landing pause and the
-game's own clock, the 3x speed-up included, shots still in the air: `playLine()` on `onClock()`),
+game's own clock, the 3x speed-up included, shots still in the air, each tap at its real time,
+between two ticks when that is when it falls: `playLine()` on `onClock()`),
 and the greedy player wins about as often as the level's `greedy` band says. Beside it: a *hasty
 greedy* player, tapping whatever is ready every 150 ms (it may win at most 10 points more than
 the greedy one, and from level 2 on it must lose sometimes); a *forecast follower* that sends
@@ -180,8 +183,9 @@ next to it as they are stored; when none does, the one that misses least, and it
 misses. A level's neighbours can change what fits it, so after picking a level pick the ones
 beside it again if `npm test` says the curve breaks there.
 `node tools/pick-deals.mjs 12 --set='{"crew":[40,70],"cols":4}'` tries other settings without
-editing the file, and `--list` prints every deal it finds with its measures instead of stopping
-at the first. Deals with more than 30 crew are skipped. `node tools/difficulty.mjs` prints every
+editing the file, and `node tools/pick-deals.mjs 12 --list` prints every deal it finds with its
+measures instead of stopping at the first, then how many it listed (it picks none). Deals with
+more than 30 crew are skipped. `node tools/difficulty.mjs` prints every
 level's size, crew, pads, "?" on screen, whether the planning player wins with a line that holds,
 the greedy rate against its band, the hasty greedy, forecast follower (waiting, against `follow`,
 and hasty) and undoing forecast follower rates, the follower's median undos (against `undos`) and

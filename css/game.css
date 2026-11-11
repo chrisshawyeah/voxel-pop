@@ -187,12 +187,13 @@ button:focus-visible { outline: 3px solid var(--ink); outline-offset: 2px; }
 .crew .fc svg { width: 12px; height: 12px; fill: none; stroke: var(--ink); stroke-width: 2.4; stroke-linecap: round; stroke-linejoin: round; }
 .crew .fc.park { border: 1.5px dashed rgba(74, 80, 120, 0.8); background: rgba(255, 255, 255, 0.92); color: var(--ink-soft); box-shadow: none; }
 /* The same forecast in words above a front while it is held, hovered or has keyboard focus:
-   "finishes", "parks 23", "finishes; strands red 12" over "if no more crew are sent", or
-   "no free pad". */
+   "finishes", "parks 23", "finishes; strands red 12" over "with no more sends", or
+   "no free pad". It wraps to stay inside the window however many crew a send strands. */
 .tip {
   position: absolute; left: 50%; bottom: calc(100% + 8px); transform: translateX(-50%);
   display: grid; justify-items: center; gap: 2px; padding: 4px 9px 5px; border-radius: 12px;
-  white-space: nowrap; pointer-events: none; line-height: 1; color: var(--ink);
+  width: max-content; max-width: calc(100vw - 12px);
+  white-space: normal; pointer-events: none; line-height: 1.2; color: var(--ink);
   background: #fff; border: 1.5px solid #fff; box-shadow: 0 2px 8px rgba(31, 37, 71, 0.3);
 }
 .tip[hidden] { display: none; }

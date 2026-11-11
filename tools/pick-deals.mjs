@@ -70,6 +70,7 @@ function pick(n) {
   let best = null; // passes everything; kept while the greedy rate is near an edge of its band
   let near = null; // misses something, by the least so far
   let big = 0;     // deals skipped for having more than 30 crew
+  let listed = 0;  // deals printed by --list
   const park = def0.opening === 'park';
   const t0 = Date.now();
   const done = found => ({ n, ...found, ms: Date.now() - t0 });
@@ -100,7 +101,7 @@ function pick(n) {
       const undoOff = back.undos === null ? 50 : Math.max(0, back.undos - def0.undos);
       const total = miss.greedy + miss.fc + undoOff + 5 * curve.filter(x => x.k !== x.n).length; // a step against a neighbour counts 5
       const found = { mix, flip, deal, rate, hasty, fc, undos: back.undos, crew: L.shooters, boards: p.boards, misses: curve.map(x => x.text), off: miss.greedy };
-      if (list) { if (!miss.greedy) console.error(say({ n, ...found, ms: Date.now() - t0 })); continue; }
+      if (list) { if (!miss.greedy) { listed++; console.error(say({ n, ...found, ms: Date.now() - t0 })); } continue; }
       if (!miss.greedy && !curve.length) {
         if (safe(rate) && snug(fc)) return done(found);
         if (!best) best = found;
@@ -109,6 +110,7 @@ function pick(n) {
       if (!near || total < near.miss) near = { ...found, miss: total };
     }
   }
+  if (listed) return done({ listed }); // --list: the deals are printed above, none is picked
   if (best || near) return done(best || near);
   const why = big ? `, ${big} deals skipped for more than 30 crew (use bigger crew)` : '';
   return { n, error: `no deal the planning player wins with a line that holds when sends overlap${park ? ' (and that opens with a parked crew member)' : ''}${why}`, ms: Date.now() - t0 };
@@ -124,6 +126,7 @@ const lineOf = (def, p) => {
 const say = (r) => {
   const d = { ...LEVELS[r.n], ...set };
   if (r.error) return `L${r.n + 1} ${d.name}: ${r.error}`;
+  if (r.listed) return `L${r.n + 1} ${d.name}: ${r.listed} deal${r.listed === 1 ? '' : 's'} listed above  ${(r.ms / 1000).toFixed(1)}s`;
   const missed = [r.off && `greedy MISSED by ${r.off}`, ...(r.misses || [])].filter(Boolean);
   return `L${r.n + 1} ${d.name}: deal ${r.deal} mix ${r.mix} flip ${r.flip}  greedy ${r.rate}% (band ${d.greedy.join('-')}%)  hasty ${r.hasty}%  follower ${r.fc}% (band ${d.follow.join('-')}%)  undos ${r.undos ?? '-'} (at most ${d.undos})  ${r.crew} crew  ${(r.ms / 1000).toFixed(1)}s${missed.length ? `\n    MISSED: ${missed.join('; ')}` : ''}`;
 };
@@ -134,7 +137,7 @@ function writePicks(results) {
   let text = readFileSync(file, 'utf8');
   let wrote = 0;
   for (const r of results) {
-    if (!r || r.error) continue;
+    if (!r || r.error || r.listed) continue;
     const name = LEVELS[r.n].name.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
     const re = new RegExp(`^  \\{ name: '${name}',.*$`, 'm');
     if (!re.test(text)) { console.log(`L${r.n + 1}: its line was not found in js/levels.js, not written`); continue; }
@@ -147,7 +150,7 @@ function writePicks(results) {
 
 if (only !== undefined) {
   const r = pick(Number(only) - 1);
-  console.log(json ? JSON.stringify(r) : `${say(r)}\n${r.error ? '' : lineOf({ ...LEVELS[r.n], ...set }, r)}`);
+  console.log(json ? JSON.stringify(r) : `${say(r)}\n${r.error || r.listed ? '' : lineOf({ ...LEVELS[r.n], ...set }, r)}`);
   if (write && !json) writePicks([r]);
 } else {
   // Every level, one child process per level, as many at once as there are processors.

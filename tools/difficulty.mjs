@@ -9,7 +9,7 @@
 //           wins, and the median undos of its wins, against `undos`
 //   sends   median sends per play of fc and of back (back's include the sends it took back)
 //   fire    seconds a winning line takes to fire for a player who sends the moment a pad frees
-//           (the game's clock: 3x while there is nothing to send or nobody has touched it for 0.5 s)
+//           (the game's clock: 3x only while there is nothing to send)
 // and at the end every place the levels break the curve (tools/players.mjs curveMisses).
 //   node tools/difficulty.mjs        every level
 //   node tools/difficulty.mjs 17     level 17 only
