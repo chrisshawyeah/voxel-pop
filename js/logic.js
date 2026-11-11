@@ -6,12 +6,15 @@
 // Time runs in ticks. In one tick every pad that can fire sends one shot. A shot picks its cube
 // when it leaves (that cube is then taken: no second shot aims at it) and the cube is removed,
 // opening the one under it, only when the shot lands, FLIGHT ticks later. The game runs one
-// tick every FIRE_GAP seconds (js/main.js); the test players run the same ticks back to back,
-// so a player who waits for the pads to stop sees exactly the board the checks saw, and the
-// checks also play each winning line with the sends overlapping in time (tools/players.mjs).
+// tick every 1/30 s, or FAST times as often while the player is only waiting
+// (pace() below); the test players run the same ticks back to back, so a player who waits for
+// the pads to stop sees exactly the board the checks saw, and the timed ones keep the game's
+// clock (pace()) to play each winning line with the sends overlapping in time (tools/players.mjs).
 
 export const START_SLOTS = 5; // launch pads, unless the level says otherwise (pads: in levels.js)
 export const FLIGHT = 9;      // ticks from a shot leaving its pad to landing (9 x 1/30 s = 0.3 s)
+export const FAST = 3;        // how much faster the ticks run while the player is only waiting (pace)
+export const IDLE_MS = 500;   // milliseconds without a touch or a key after which the ticks run FAST
 // Which version of these rules a saved attempt was played under (js/main.js keeps it with the
 // save). Add one whenever a change here makes the same sends end on a different board, so a level
 // left half-played under the old rules starts again instead of coming back wrong.
@@ -249,6 +252,18 @@ export function tickGame(st) {
   return r;
 }
 
+// How fast the next tick runs, 1 or FAST, with `quietMs` the real milliseconds since the player last
+// touched the screen or pressed a key (0 while a finger is down). The game
+// (js/main.js tick()) and the timed test players (tools/players.mjs) both ask this before every
+// tick. Normal speed while any crew member is still landing, so its flight up to the pad (120 ms)
+// always ends before its first shot; otherwise FAST while there is nothing to send (every pad
+// taken, or every line empty) or the player has been still for IDLE_MS; otherwise normal speed.
+export function pace(st, quietMs) {
+  if (st.slots.some(s => s && s.land > 0)) return 1;
+  if (freeSlot(st) < 0 || st.columns.every(c => !c.length)) return FAST;
+  return quietMs >= IDLE_MS ? FAST : 1;
+}
+
 // Nothing would change in a tick but the clock: no shot in the air, nobody landing, nothing that
 // can fire.
 const idle = st => !st.flying.length && st.slots.every(s => !s || (!(s.land > 0) && !(s.count > 0 && st.exposed[s.color].size)));
@@ -262,22 +277,38 @@ export function advance(st, tick) {
   return st;
 }
 
-// What sending the front of line `col` now would do if nothing else were sent after it: the
+// What sending the front of line `col` now would do if no more crew were sent after it: the
 // rules run on a copy of the board, with the crew already on the pads, the shots in the air,
 // the landing pause and the one targeting rule, until that crew member has sent its last shot
-// (it finishes and frees its pad) or nothing can fire any more (it parks, with `left` shots).
-// null when it cannot be sent now (the line is empty or every pad is taken).
-export function forecast(st, col, land = 0) {
+// (it finishes and frees its pad) or nothing can fire any more (it parks, with `left` shots), and
+// until every crew member already on a pad that would finish without this send has finished or
+// is stuck. Those stuck are `strands`: [{ id, color, left }], pad by pad, the crew this send
+// leaves parked that would otherwise have finished. `base` is fates(st), when already known (it
+// holds from one send to the next). null when it cannot be sent now (the line is empty or every
+// pad is taken).
+export function forecast(st, col, land = 0, base = null) {
   const sim = cloneBoard(st);
   const d = deploy(sim, col, land);
   if (!d) return null;
   const me = d.shooter;
+  const onPads = sim.slots.filter(s => s && s !== me);
+  if (onPads.length && !base) base = fates(st);
+  const watch = onPads.filter(s => base.get(s.id) === 0);
+  let mine = null;
   for (;;) {
-    if (sim.slots[d.slot] !== me) return { finishes: true, left: 0 };
-    if (!busy(sim)) return { finishes: false, left: me.count };
+    const moving = busy(sim);
+    if (!mine && sim.slots[d.slot] !== me) mine = { finishes: true, left: 0 };
+    if (!mine && !moving) mine = { finishes: false, left: me.count };
+    if (mine && (!moving || watch.every(s => !sim.slots.includes(s)))) break;
     tickGame(sim);
   }
+  mine.strands = watch.filter(s => sim.slots.includes(s)).map(s => ({ id: s.id, color: s.color, left: s.count }));
+  return mine;
 }
+
+// A forecast in one word for comparing two of them: 'done' for a send that finishes and strands
+// nobody, otherwise what is left parked.
+export const forecastKey = f => (!f ? 'full' : !f.strands.length && f.finishes ? 'done' : `${f.left}|${f.strands.map(s => `${s.id}.${s.left}`).join(',')}`);
 
 // What becomes of each crew member already on a pad if nothing else is sent: the rules run on a
 // copy of the board until nothing moves. A Map from crew id to the shots it is left with when it

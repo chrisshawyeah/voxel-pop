@@ -1,8 +1,8 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { makeBoard, cloneBoard, removeCube, deploy, fire, step, settle, launch, target, isJammed, isWon, canFire, canReach, purgeCleared, isExposed, freeSlot, FLIGHT, tickGame, advance, forecast, fates, busy, revealLone, checkOf, Attempt } from '../js/logic.js';
+import { makeBoard, cloneBoard, removeCube, deploy, fire, step, settle, launch, target, isJammed, isWon, canFire, canReach, purgeCleared, isExposed, freeSlot, FLIGHT, tickGame, advance, forecast, forecastKey, fates, busy, revealLone, checkOf, pace, Attempt, FAST, IDLE_MS } from '../js/logic.js';
 import { LEVELS, buildLevel, dealLevel, levelPrint, rng } from '../js/levels.js';
-import { plan, greedy, greedyCheck, hastyCheck, hastyGreedy, lineHolds, playLine, earlyParks, forecastFirst, backtrack, forecastCheck, hastyForecastCheck, backtrackCheck, firingTime, GAPS, LAND, GREEDY_PLAYS, FORECAST_FROM, FORECAST_MAX, PARK_MIN } from '../tools/players.mjs';
+import { plan, greedy, greedyCheck, hastyCheck, hastyGreedy, lineHolds, playLine, onClock, earlyParks, forecastFirst, backtrack, forecastCheck, hastyForecastCheck, backtrackCheck, firingTime, curveMisses, GAPS, LAND, GREEDY_PLAYS, PARK_MIN } from '../tools/players.mjs';
 
 const at = (m, x, y, z) => x + m.sx * (y + m.sy * z);
 const solid = (n, color = 1) => ({ sx: n, sy: n, sz: n, cells: new Uint8Array(n * n * n).fill(color), palette: ['#f00', '#0f0', '#00f'] });
@@ -167,18 +167,27 @@ test('the planning player treats a "?" as unknown until it reaches the front', (
 });
 
 // The front of line ci sent now with the game's landing pause, and nothing sent after it, played
-// through the game's own send (Attempt) and tick: what really happens to that crew member.
+// through the game's own send (Attempt) and tick until nothing moves: what really happens to that
+// crew member, and which crew already on a pad end up parked that would have finished without it.
 function sendAndWatch(st, ci) {
+  const without = cloneBoard(st);
+  const onPads = without.slots.filter(Boolean);
+  settle(without);
+  const finished = new Set(onPads.filter(x => !without.slots.includes(x)).map(x => x.id));
   const a = new Attempt(cloneBoard(st));
   const d = a.send(ci, LAND);
   if (!d) return null;
   const id = d.shooter.id;
+  const others = a.board.slots.filter(x => x && x.id !== id);
+  let mine = null;
   for (;;) {
     const s = a.board.slots.find(x => x && x.id === id);
-    if (!s) return { finishes: true, left: 0 };
-    if (!busy(a.board)) return { finishes: false, left: s.count };
+    if (!mine && !s) mine = { finishes: true, left: 0 };
+    if (!busy(a.board)) { mine = mine || { finishes: false, left: s.count }; break; }
     tickGame(a.board);
   }
+  mine.strands = others.filter(x => finished.has(x.id) && a.board.slots.includes(x)).map(x => ({ id: x.id, color: x.color, left: x.count }));
+  return mine;
 }
 
 test('undo takes back the last send: cubes, lines, pads, shots in the air and the clock', () => {
@@ -339,20 +348,48 @@ test('a "?" stays a "?" only while there is more than one crew it could be', () 
   }
 });
 
-test('a crew member on a pad shows at once that a later send has made it park', () => {
-  // Two red cubes open and a third under green. Red 2 sent alone finishes; red 1 sent just after it
-  // also finishes, alone; but the two then share the open cubes and red 2 is left with one.
+test('the forecast says which crew on the pads a send strands, before it is sent', () => {
+  // Two red cubes open and a third under green. Red 2 sent with nobody after it finishes; red 1
+  // sent just after it also finishes, but the two then share the open cubes and red 2 is left with
+  // one: the forecast for red 1 says so before the send ("finishes; strands red 1"), and red 2's pad
+  // shows it once red 1 has gone.
   const st = makeBoard({ sx: 3, sy: 2, sz: 1, cells: Uint8Array.from([0, 0, 1, 1, 1, 2]), palette: ['#f00', '#0f0'] });
   st.slots = [null, null, null];
   st.columns = [[crew(0, 0, 2)], [crew(1, 0, 1)], [crew(2, 1, 1)]];
-  assert.deepEqual(forecast(st, 0, LAND), { finishes: true, left: 0 });
+  assert.deepEqual(forecast(st, 0, LAND), { finishes: true, left: 0, strands: [] });
   deploy(st, 0, LAND);
-  assert.deepEqual([...fates(st)], [[0, 0]], 'red 2 alone finishes');
-  assert.deepEqual(forecast(st, 1, LAND), { finishes: true, left: 0 }, 'red 1 finishes alone too');
+  assert.deepEqual([...fates(st)], [[0, 0]], 'red 2 finishes if no more crew are sent');
+  const f = forecast(st, 1, LAND);
+  assert.deepEqual(f, { finishes: true, left: 0, strands: [{ id: 0, color: 0, left: 1 }] }, 'red 1 finishes, but strands red 2 with 1');
+  assert.deepEqual(f, sendAndWatch(st, 1), 'and that is what happens');
+  assert.deepEqual(forecast(st, 1, LAND, fates(st)), f, 'the same with the pads\' fates handed in');
+  assert.notEqual(forecastKey(f), 'done', 'a send that strands someone is not shown as a clean tick');
+  assert.deepEqual(forecast(st, 2, LAND), { finishes: true, left: 0, strands: [] }, 'green finishes and strands nobody: it opens the third red');
   deploy(st, 1, LAND);
   assert.deepEqual([...fates(st)], [[0, 1], [1, 0]], 'now red 2 parks with 1');
   settle(st);
   assert.equal(st.slots[0].count, 1, 'and so it does');
+});
+
+test('the forecast follows the clock while a shot is only flying', () => {
+  // Two stacks: red under green, and red under blue. Green 1 on pad 3 fires at once; its shot opens
+  // the first red when it lands, at tick 10. Red 1 sleeps on pad 2 waiting for it. Another red 1 sent
+  // to pad 1 by tick 5 has landed by then and fires first (pad 1 goes first): it finishes, and the
+  // sleeper, which would have taken that cube, is stranded (the other red is under blue, whose crew
+  // waits in a line). Sent from tick 6, it lands too late and parks. Between, no shot leaves or
+  // lands and nobody lands: only the clock tells the two forecasts apart.
+  const st = makeBoard({ sx: 2, sy: 2, sz: 1, cells: Uint8Array.from([1, 1, 2, 3]), palette: ['#f00', '#0f0', '#00f'] });
+  st.slots = [null, crew(10, 0, 1), crew(11, 1, 1)];
+  st.columns = [[crew(0, 0, 1)], [crew(1, 2, 1)]];
+  const seen = [];
+  for (let t = 0; t <= 9; t++) {
+    const f = forecast(st, 0, LAND);
+    assert.deepEqual(f, sendAndWatch(st, 0), `tick ${st.tick}`);
+    seen.push(f.finishes ? `finishes, strands ${f.strands.map(s => s.id)}` : `parks ${f.left}`);
+    const r = tickGame(st);
+    if (t >= 1 && t <= 8) assert.equal(r.shots.length + r.landed.length, 0, `tick ${st.tick}: nothing leaves or lands`);
+  }
+  assert.deepEqual(seen, [...Array(6).fill('finishes, strands 10'), ...Array(4).fill('parks 1')]);
 });
 
 test('the hasty greedy player loses what the waiting one wins, but only when it rushes', () => {
@@ -365,15 +402,54 @@ test('the hasty greedy player loses what the waiting one wins, but only when it 
   st.slots = [null, null];
   st.columns = [[crew(0, 0, 2)], [crew(1, 0, 1)], [crew(2, 1, 1)]];
   const rate = (gap, plays = 200) => { const r = rng(5); let w = 0; for (let k = 0; k < plays; k++) w += hastyGreedy(st, r, gap); return (100 * w) / plays; };
-  const r1 = rate(1);
+  const r1 = rate(33);
   assert.ok(r1 > 20 && r1 < 80, `33 ms apart it wins about half the time, not ${r1}%`);
-  assert.equal(rate(5), 100, '150 ms apart it always wins');
+  assert.equal(rate(150), 100, '150 ms apart it always wins');
   const g = rng(6);
   for (let k = 0; k < 50; k++) assert.equal(greedy(st, g), true, 'waiting always wins');
 });
 
-test('the mark follower wins less without undo than with it, and its undos are counted', () => {
-  const n = LEVELS.findIndex((_, k) => k >= FORECAST_FROM && forecastCheck(buildLevel(k).board).rate < 60);
+test('the speed-up: 3x while the player only waits, 1x while a crew member lands or a finger is down', () => {
+  const st = makeBoard(stack(1, 1, 1));
+  st.slots = [null, null];
+  st.columns = [[crew(0, 0, 1), crew(1, 0, 1)], [crew(2, 0, 1)]];
+  assert.equal(pace(st, 0), 1, 'a pad free and the player has just tapped (or is pressing: 0)');
+  assert.equal(pace(st, IDLE_MS - 1), 1);
+  assert.equal(pace(st, IDLE_MS), FAST, 'half a second with no input, though a pad is free');
+  deploy(st, 0, LAND);
+  assert.equal(pace(st, 1e9), 1, 'never faster while a crew member is landing');
+  for (let t = 0; t < LAND; t++) tickGame(st);
+  assert.equal(pace(st, 0), 1, 'landed, and the player has just tapped');
+  st.slots = [crew(5, 0, 1), crew(6, 0, 1)];
+  assert.equal(pace(st, 0), FAST, 'every pad taken: nothing to send');
+  st.slots = [null, null];
+  st.columns = [[], []];
+  assert.equal(pace(st, 0), FAST, 'every line empty: nothing to send');
+});
+
+test('the timed test players keep the game\'s clock', () => {
+  // Sixty red cubes in one stack, three red crew of 20 in one line, three pads, a tap every 600 ms.
+  // The first goes at tick 0. It lands (5 ticks at 1x), the board runs at 1x until nobody has
+  // tapped for 500 ms (tick 15), then at 3x: the next tap's 600 ms are up at tick 24, not 18.
+  const st = makeBoard({ sx: 1, sy: 60, sz: 1, cells: new Uint8Array(60).fill(1), palette: ['#f00'] });
+  st.slots = [null, null, null];
+  st.columns = [[crew(0, 0, 20), crew(1, 0, 20), crew(2, 0, 20)]];
+  const at = [];
+  const r = onClock(st, 600, b => { if (!b.columns[0].length) return -1; at.push(b.tick); return 0; });
+  assert.equal(r.win, true);
+  assert.deepEqual(at, [0, 24, 48]);
+  assert.ok(r.seconds < r.ticks / 30 && r.seconds > r.ticks / 90, `${r.ticks} ticks in ${r.seconds} s: some at 3x, not all`);
+  assert.equal(firingTime(st, [0, 0, 0]), onClock(st, 0, b => (b.columns[0].length ? 0 : -1)).seconds, 'firingTime is the same clock');
+  // 150 ms apart (the hasty players), every send lands before the next.
+  const sends = [];
+  const four = cloneBoard(st);
+  four.slots = [null, null, null, null];
+  onClock(four, 150, b => { if (!b.columns[0].length) return -1; sends.push(b.tick); return 0; });
+  assert.deepEqual(sends, [0, 5, 10]);
+});
+
+test('the forecast follower wins less without undo than with it, and its undos are counted', () => {
+  const n = LEVELS.findIndex((_, k) => k >= 8 && forecastCheck(buildLevel(k).board).rate < 60);
   assert.ok(n >= 0, 'some late level beats the mark follower more often than not');
   const L = buildLevel(n);
   const r = rng(9);
@@ -390,7 +466,7 @@ test('the mark follower wins less without undo than with it, and its undos are c
 });
 
 test('the finishes-or-parks forecast says what really happens when that crew member is sent', () => {
-  let checked = 0, parks = 0;
+  let checked = 0, parks = 0, strands = 0;
   for (const n of [3, 7, 12, 14, 17, 18, 19]) {
     const L = buildLevel(n);
     const st = cloneBoard(L.board);
@@ -401,7 +477,7 @@ test('the finishes-or-parks forecast says what really happens when that crew mem
           if (!c.length) return;
           const f = forecast(st, ci, LAND);
           assert.deepEqual(f, sendAndWatch(st, ci), `level ${n + 1}, tick ${st.tick}, line ${ci + 1}`);
-          if (f) { checked++; parks += !f.finishes; }
+          if (f) { checked++; parks += !f.finishes; strands += f.strands.length > 0; }
         });
       }
       if (t % 5 === 0) {
@@ -411,7 +487,7 @@ test('the finishes-or-parks forecast says what really happens when that crew mem
       tickGame(st);
     }
   }
-  assert.ok(checked > 200 && parks > 20, `${checked} forecasts checked, ${parks} of them parks`);
+  assert.ok(checked > 200 && parks > 20, `${checked} forecasts checked, ${parks} of them parks, ${strands} strand someone`);
 });
 
 test('level 19: crew the forecast says will park fill its three pads, and undo gets out of the jam', () => {
@@ -453,6 +529,7 @@ test('playLine sends a line with the sends overlapping in time, and says when it
   assert.equal(playLine(st, [1, 0, 0], 0), false);
 });
 
+const measured = []; // per level: the forecast follower's rate and the backtracking player's median undos
 for (let n = 0; n < LEVELS.length; n++) {
   const def = LEVELS[n];
   test(`level ${n + 1} (${def.name}) is dealt as stored and the planning player wins it`, () => {
@@ -488,14 +565,27 @@ for (let n = 0; n < LEVELS.length; n++) {
     const rate = greedyCheck(L.board);
     const hasty = hastyCheck(L.board);
     const fc = forecastCheck(L.board), fch = hastyForecastCheck(L.board), back = backtrackCheck(L.board);
+    measured[n] = { fc: fc.rate, undos: back.undos };
     const [lo, hi] = def.greedy;
-    console.log(`  L${n + 1} ${def.name}: ${L.board.total} cubes, ${L.shooters} crew, ${def.pads} pads, ${hidden} "?", plan wins in ${p.boards} boards, fires in ${fire.toFixed(1)} s; of ${GREEDY_PLAYS}: greedy ${rate}% (band ${lo}-${hi}%) hasty ${hasty}%; mark follower ${fc.rate}% (${fc.sends} sends), hasty ${fch.rate}%; with undo ${back.rate}%, median ${back.undos ?? '-'} undos, ${back.sends} sends`);
+    console.log(`  L${n + 1} ${def.name}: ${L.board.total} cubes, ${L.shooters} crew, ${def.pads} pads, ${hidden} "?", plan wins in ${p.boards} boards, fires in ${fire.toFixed(1)} s; of ${GREEDY_PLAYS}: greedy ${rate}% (band ${lo}-${hi}%) hasty ${hasty}%; forecast follower ${fc.rate}% (band ${def.follow.join('-')}%, ${fc.sends} sends), hasty ${fch.rate}%; with undo ${back.rate}%, median ${back.undos ?? '-'} undos (at most ${def.undos}), ${back.sends} sends`);
     assert.ok(rate >= lo && rate <= hi, `greedy wins ${rate}%, outside ${lo}-${hi}%`);
     if (n >= 3) assert.ok(rate < 100, 'after level 3 a greedy player must lose sometimes');
     // Rushing never wins much more often than waiting, and from level 2 on it loses sometimes.
     assert.ok(hasty <= rate + 10, `the hasty greedy player wins ${hasty}%, far above waiting's ${rate}%`);
     if (n >= 1) assert.ok(hasty < 100, 'from level 2 on, rushing must lose sometimes');
-    if (n >= FORECAST_FROM) assert.ok(fc.rate <= FORECAST_MAX, `following the mark without undo wins ${fc.rate}%; from level ${FORECAST_FROM + 1} on it must lose some of the time (at most ${FORECAST_MAX}%)`);
-    assert.ok(back.rate >= fc.rate, 'undo never makes the mark follower worse');
+    // The curve: the forecast follower inside the level's band, and the undos a backtracking player
+    // needs at most the level's own (the steps between levels are the next test).
+    const own = curveMisses(LEVELS, measured).filter(x => x.n === n && x.k === n).map(x => x.text);
+    assert.deepEqual(own, [], own.join('; '));
+    assert.ok(back.rate >= fc.rate, 'undo never makes the forecast follower worse');
   });
 }
+
+test('the curve: no level much easier than the one before it, and undos that move by small steps', () => {
+  assert.equal(measured.filter(Boolean).length, LEVELS.length, 'every level was measured (see the level tests above)');
+  const steps = curveMisses(LEVELS, measured).filter(x => x.k !== x.n).map(x => x.text);
+  assert.deepEqual(steps, [], steps.join('; '));
+  assert.ok(LEVELS.every(d => d.undos <= 6) && LEVELS.slice(0, 12).every(d => d.undos <= 3), 'at most 3 undos up to level 12, at most 6 after');
+  const breathers = LEVELS.map((_, n) => n).filter(n => n > 0 && LEVELS[n].follow[0] > LEVELS[n - 1].follow[1]);
+  assert.deepEqual(breathers.map(n => LEVELS[n].name), ['Melon'], 'one breather, the melon');
+});
