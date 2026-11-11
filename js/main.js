@@ -493,14 +493,17 @@ function showReach() {
 
 // Shows what sending line ci would do on its front (-1: on none). `hold` when a touch held it: that
 // is the player using the preview, so the marks can go (HOLD). A mouse over a front or keyboard
-// focus on it counts too once the words have been up HOLD_MS.
+// focus on it counts too once the words have been up HOLD_MS. Either counts only when it showed a
+// real forecast (realPreview): the page in view, a level being played and a free pad, so the words
+// said what the send would do, not "no free pad".
 let seenTimer = 0;
+const realPreview = ci => state === 'play' && document.visibilityState === 'visible' && forecastFor(ci) !== null;
 function inspect(ci, hold = false) {
   if (ci >= 0 && (state !== 'play' && state !== 'jam')) ci = -1;
   clearTimeout(seenTimer);
   if (ci >= 0 && !(taught & HOLD)) {
-    if (hold) learnHold();
-    else seenTimer = setTimeout(() => { if (inspecting === ci) learnHold(); }, HOLD_MS);
+    if (hold) { if (realPreview(ci)) learnHold(); }
+    else seenTimer = setTimeout(() => { if (inspecting === ci && realPreview(ci)) learnHold(); }, HOLD_MS);
   }
   if (ci === inspecting) return;
   inspecting = ci;

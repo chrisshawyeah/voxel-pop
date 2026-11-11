@@ -464,6 +464,45 @@ test('the timed test players keep the game\'s clock', () => {
   assert.deepEqual(sends, [0, 4, 9]);
 });
 
+// One top-level function or one-line const of js/main.js, as written there (the file as a whole
+// needs a page and three.js to run).
+const mainSrc = readFileSync(new URL('../js/main.js', import.meta.url), 'utf8');
+function mainPart(name) {
+  const at = mainSrc.search(new RegExp(`^(function ${name}\\(|const ${name} = )`, 'm'));
+  assert.ok(at >= 0, `js/main.js has ${name}`);
+  return mainSrc.startsWith('const', at) ? mainSrc.slice(at, mainSrc.indexOf('\n', at)) : mainSrc.slice(at, mainSrc.indexOf('\n}\n', at) + 2);
+}
+
+test('the hold lesson is learned only from a forecast really shown', () => {
+  // inspect() and realPreview() from js/main.js, run on a stand-in for the page. A touch held on a
+  // front (hold) or a mouse or keyboard on it for 300 ms (the timer) teaches the hold only with the
+  // page in view, a level being played and a free pad: a preview that said "no free pad" does not.
+  const page = ({ state = 'play', free = true }) => new Function('env', `
+    const state = ${JSON.stringify(state)}, HOLD = 8, HOLD_MS = 300, st = {};
+    let taught = 0, inspecting = -1, seenTimer = 0;
+    const document = { get visibilityState() { return env.hidden ? 'hidden' : 'visible'; } };
+    const forecastFor = () => (${free} ? { finishes: true, left: 0, strands: [] } : null);
+    const learnHold = () => { env.learned++; taught |= HOLD; };
+    const showReach = () => {};
+    const timers = [];
+    const setTimeout = fn => timers.push(fn);
+    const clearTimeout = k => { if (k) timers[k - 1] = null; };
+    ${mainPart('realPreview')}
+    ${mainPart('inspect')}
+    env.later = () => timers.splice(0).forEach(fn => fn && fn());
+    return inspect;
+  `);
+  const learned = (setup, act) => { const env = { learned: 0, hidden: false }; act(page(setup)(env), env); return env.learned; };
+  assert.equal(learned({}, inspect => inspect(0, true)), 1, 'a hold with a free pad teaches it');
+  assert.equal(learned({ free: false }, inspect => inspect(0, true)), 0, 'a hold that showed "no free pad" does not');
+  assert.equal(learned({ state: 'jam', free: false }, inspect => inspect(0, true)), 0, 'nor one while out of room');
+  assert.equal(learned({}, (inspect, env) => { env.hidden = true; inspect(0, true); }), 0, 'nor one on a hidden page');
+  assert.equal(learned({}, (inspect, env) => { inspect(0); env.later(); }), 1, 'a hover kept 300 ms with a free pad teaches it');
+  assert.equal(learned({ free: false }, (inspect, env) => { inspect(0); env.later(); }), 0, 'a hover that showed "no free pad" does not');
+  assert.equal(learned({}, (inspect, env) => { inspect(0); env.hidden = true; env.later(); }), 0, 'nor one whose 300 ms ran out on a hidden page');
+  assert.equal(learned({}, (inspect, env) => { inspect(0); inspect(-1); env.later(); }), 0, 'nor one left before 300 ms');
+});
+
 test('the forecast follower wins less without undo than with it, and its undos are counted', () => {
   const n = LEVELS.findIndex((_, k) => k >= 8 && forecastCheck(buildLevel(k).board).rate < 60);
   assert.ok(n >= 0, 'some late level beats the mark follower more often than not');

@@ -34,7 +34,8 @@ name. It is worked out again whenever the board changes and, while shots are in 
 tick, so it is right the moment it shows. It is hidden while every pad is taken ("no free pad"
 when asked). Levels 1 to 3 always show the marks under the fronts. From level 4 they show too, with
 the line "Hold a front crew to preview. Tap to send.", until the player has held a front (or kept
-a mouse or the keyboard on one) for 300 ms; from then on, from level 4, a front shows only ready or
+a mouse or the keyboard on one) for 300 ms while it showed a real forecast (the page in view and a
+pad free, not "no free pad"); from then on, from level 4, a front shows only ready or
 covered and the words come when asked. The browser remembers it (`crumble-crew.taught`), so a
 player who starts on a late level is taught the same way. A crew member already on a pad shows
 "parks 23" as soon as a later send has made it certain to park (`fates()` in `js/logic.js`).
