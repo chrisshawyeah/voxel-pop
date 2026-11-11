@@ -1,8 +1,8 @@
 // Test players for measuring a level, using the same rules and ticks as the game (js/logic.js).
 // greedy and plan wait for the pads to stop before each send; playLine, hastyGreedy and
 // hastyForecast (below) send while shots are still in the air, with the game's landing pause and
-// the game's own clock (pace() in js/logic.js: a tick runs three times as fast while the player is
-// only waiting), as a quick player does.
+// the game's own clock (pace() in js/logic.js: a tick runs three times as fast while there is
+// nothing to send), as a quick player does.
 //
 // greedy: sends the front of any line whose colour can be hit right now, picked at random
 //   among those; when none can be hit, any front at random. This is "send whatever can shoot".
@@ -26,42 +26,48 @@ export const LAND = 5;
 export const GAPS = [0, 150, 300, 600];
 export const HASTY_GAP = 150; // the hasty players tap every 150 ms
 
-// The game's clock for the timed players. Time is kept in ninetieths of a second: a tick at
-// normal speed takes 3 of them, at 3x one (pace() in js/logic.js, asked before every tick as the
-// game asks it), so every gap lands on the same tick it would in the game. The player's own taps
-// are the only input: `quiet` is the time since the last one.
+// The game's clock for the timed players, as js/main.js tick() keeps it. Time is kept in
+// ninetieths of a second: a tick at normal speed takes 3 of them, at 3x one (pace() in js/logic.js,
+// asked as the game asks it; the players' taps are instant, so no finger is ever down). A tap
+// lands at its real time, between two ticks when that is when it falls, and the tick under way
+// keeps the part of it already run, as in the game: 150 ms after a tap on a tick is 4.5 ticks
+// at normal speed, so the next tap comes after the fourth tick, the one after that after the ninth.
+// A tap and a tick due at the same moment: the tick goes first.
 const units = ms => (ms * 90) / 1000;
-const tickLength = (st, quiet) => 3 / pace(st, (quiet * 1000) / 90); // this tick, in ninetieths of a second
 
 // Plays a board on the game's clock, with the game's ticks and landing pause, without waiting for
 // the pads to stop: once `gap` ms have passed since the last tap and a pad is free, it asks
 // `choose(st)` for a line to send (-1: none now) and sends it at once; when nothing is chosen it
-// asks again on the next tick, or, `patient`, `gap` ms later (a player reading the forecast looks
-// again at the same pace it taps). It ends when the board is won or out of room, or when nothing is
-// chosen and nothing moves. { win, sends, seconds, ticks } (seconds of the game's clock, and rule
-// ticks, until it ended).
+// asks again just after the next tick, or, `patient`, `gap` ms later (a player reading the
+// forecast looks again at the same pace it taps). It ends when the board is won or out of room, or
+// when nothing is chosen and nothing moves. { win, sends, seconds, ticks } (seconds of the game's
+// clock, and rule ticks, until it ended).
 export function onClock(board, gap, choose, land = LAND, patient = false) {
   const st = cloneBoard(board);
   const g = units(gap);
-  let quiet = Infinity, sends = 0, t = 0, ask = 0;
+  let sends = 0, t = 0;
+  let ask = 0;  // when the player may tap (or look) next
+  let part = 0; // how much of the tick under way has run, of its 3 at normal speed
   const end = win => ({ win, sends, seconds: t / 90, ticks: st.tick });
   for (;;) {
     if (isWon(st)) return end(true);
     if (isJammed(st)) return end(false);
-    if (quiet >= g && t >= ask && freeSlot(st) >= 0) {
+    const speed = pace(st);
+    const due = t + (3 - part) / speed; // when the next tick runs
+    if (t >= ask && freeSlot(st) >= 0) {
       const ci = choose(st);
       if (ci >= 0) {
         if (!deploy(st, ci, land)) return end(false);
         sends++;
-        quiet = 0;
+        ask = t + g;
         continue;
       }
       if (!busy(st)) return end(false); // nothing to send and nothing moving: nothing will change
-      if (patient) ask = t + g;
+      ask = patient && g > 0 ? t + g : due;
     }
-    const u = tickLength(st, quiet);
+    if (ask < due && freeSlot(st) >= 0) { part += (ask - t) * speed; t = ask; continue; } // the tap falls before the next tick
     tickGame(st);
-    quiet += u; t += u;
+    t = due; part = 0;
   }
 }
 
@@ -300,8 +306,9 @@ export const hastyForecastCheck = board => measure(hastyForecast, board, 780, FO
 export const BACKTRACK_PLAYS = 40;
 export const backtrackCheck = board => measure(backtrack, board, 781, BACKTRACK_PLAYS);
 
-// How long a winning line takes to fire, in seconds of the game's clock, for a player who sends
-// the moment a pad is free (no thinking); Infinity when it does not win.
+// How long a winning line takes to fire, in seconds of the game's clock (onClock, the same speed
+// rule as the game), for a player who sends the moment a pad is free (no thinking); Infinity when
+// it does not win.
 export function firingTime(board, line, land = LAND) {
   let k = 0;
   const r = onClock(board, 0, () => (k < line.length ? line[k++] : -1), land);

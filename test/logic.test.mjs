@@ -1,6 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { makeBoard, cloneBoard, removeCube, deploy, fire, step, settle, launch, target, isJammed, isWon, canFire, canReach, purgeCleared, isExposed, freeSlot, FLIGHT, tickGame, advance, forecast, forecastKey, fates, busy, revealLone, checkOf, pace, Attempt, FAST, IDLE_MS } from '../js/logic.js';
+import { readFileSync } from 'node:fs';
+import { makeBoard, cloneBoard, removeCube, deploy, fire, step, settle, launch, target, isJammed, isWon, canFire, canReach, purgeCleared, isExposed, freeSlot, FLIGHT, tickGame, advance, forecast, forecastKey, fates, busy, revealLone, checkOf, pace, Attempt, FAST } from '../js/logic.js';
 import { LEVELS, buildLevel, dealLevel, levelPrint, rng } from '../js/levels.js';
 import { plan, greedy, greedyCheck, hastyCheck, hastyGreedy, lineHolds, playLine, onClock, earlyParks, forecastFirst, backtrack, forecastCheck, hastyForecastCheck, backtrackCheck, firingTime, curveMisses, GAPS, LAND, GREEDY_PLAYS, PARK_MIN } from '../tools/players.mjs';
 
@@ -393,59 +394,74 @@ test('the forecast follows the clock while a shot is only flying', () => {
 });
 
 test('the hasty greedy player loses what the waiting one wins, but only when it rushes', () => {
-  // One stack, from the bottom: red, red, green, red. Red 2, red 1 and green 1, two pads. Sent
-  // 33 ms apart, red 2 and red 1 both land before the one open red is hit: one of them takes it,
-  // red 2 then sleeps with 1 left and red 1 with 1 (or red 1 finishes and frees its pad), and green
-  // cannot go up when both pads hold a sleeper. 150 ms apart, the first shot has already taken
-  // the open red, so nothing else looks ready until green opens.
+  // One stack, from the bottom: red, red, green, red. Red 2, red 1 and green 1, two pads. The crew
+  // sent first lands and fires at the one open red on tick 5. A tap on the other red before that
+  // (33 ms later, or 150 ms later, which falls between ticks four and five) sends it while that red
+  // still looks open: if red 2 went first, it then sleeps with 1 left and red 1 with 1, and green
+  // cannot go up when both pads hold a sleeper (if red 1 went first it finishes and frees its pad).
+  // 200 ms apart, the first shot has already taken the open red, so nothing else looks ready until
+  // green opens.
   const st = makeBoard(stack(1, 1, 2, 1));
   st.slots = [null, null];
   st.columns = [[crew(0, 0, 2)], [crew(1, 0, 1)], [crew(2, 1, 1)]];
+  // Red 2, then red 1 150 ms later: sent on ticks 0 and 4, before red 2's first shot; out of room at tick 14.
+  const line = [0, 1, 2], at = [];
+  const lost = onClock(st, 150, b => (at.length < line.length ? line[at.push(b.tick) - 1] : -1));
+  assert.deepEqual(at, [0, 4], 'the second tap lands between ticks four and five');
+  assert.deepEqual([lost.win, lost.ticks], [false, 14]);
+  assert.equal(playLine(st, [0, 1, 2], 150), false);
   const rate = (gap, plays = 200) => { const r = rng(5); let w = 0; for (let k = 0; k < plays; k++) w += hastyGreedy(st, r, gap); return (100 * w) / plays; };
-  const r1 = rate(33);
-  assert.ok(r1 > 20 && r1 < 80, `33 ms apart it wins about half the time, not ${r1}%`);
-  assert.equal(rate(150), 100, '150 ms apart it always wins');
+  for (const gap of [33, 150]) {
+    const r = rate(gap);
+    assert.ok(r > 20 && r < 80, `${gap} ms apart it wins about half the time (whichever red goes first), not ${r}%`);
+  }
+  assert.equal(rate(200), 100, '200 ms apart it always wins');
   const g = rng(6);
   for (let k = 0; k < 50; k++) assert.equal(greedy(st, g), true, 'waiting always wins');
 });
 
-test('the speed-up: 3x while the player only waits, 1x while a crew member lands or a finger is down', () => {
+test('the speed-up: 3x only while nothing can be sent, 1x while a crew member lands or a finger is down', () => {
   const st = makeBoard(stack(1, 1, 1));
   st.slots = [null, null];
   st.columns = [[crew(0, 0, 1), crew(1, 0, 1)], [crew(2, 0, 1)]];
-  assert.equal(pace(st, 0), 1, 'a pad free and the player has just tapped (or is pressing: 0)');
-  assert.equal(pace(st, IDLE_MS - 1), 1);
-  assert.equal(pace(st, IDLE_MS), FAST, 'half a second with no input, though a pad is free');
+  assert.equal(pace(st), 1, 'a pad free: normal speed however long the player thinks');
+  assert.equal(pace(st, true), 1);
   deploy(st, 0, LAND);
-  assert.equal(pace(st, 1e9), 1, 'never faster while a crew member is landing');
+  assert.equal(pace(st), 1, 'never faster while a crew member is landing');
   for (let t = 0; t < LAND; t++) tickGame(st);
-  assert.equal(pace(st, 0), 1, 'landed, and the player has just tapped');
+  assert.equal(pace(st), 1, 'landed, and a pad still free');
   st.slots = [crew(5, 0, 1), crew(6, 0, 1)];
-  assert.equal(pace(st, 0), FAST, 'every pad taken: nothing to send');
+  assert.equal(pace(st), FAST, 'every pad taken: nothing to send');
+  assert.equal(pace(st, true), 1, 'but 1x while a finger is down');
   st.slots = [null, null];
   st.columns = [[], []];
-  assert.equal(pace(st, 0), FAST, 'every line empty: nothing to send');
+  assert.equal(pace(st), FAST, 'every line empty: nothing to send');
+  assert.equal(pace(st, true), 1, 'but 1x while a finger is down');
+  assert.match(readFileSync(new URL('../js/main.js', import.meta.url), 'utf8'), /speed = R\.pace\(st, pressed\.size > 0\);/, 'the game asks the same function, with its fingers down');
 });
 
 test('the timed test players keep the game\'s clock', () => {
   // Sixty red cubes in one stack, three red crew of 20 in one line, three pads, a tap every 600 ms.
-  // The first goes at tick 0. It lands (5 ticks at 1x), the board runs at 1x until nobody has
-  // tapped for 500 ms (tick 15), then at 3x: the next tap's 600 ms are up at tick 24, not 18.
+  // The first goes at tick 0. With a pad free and crew in the line the board runs at 1x however
+  // long the player waits, so the next tap's 600 ms are 18 ticks; once the line is empty, 3x.
   const st = makeBoard({ sx: 1, sy: 60, sz: 1, cells: new Uint8Array(60).fill(1), palette: ['#f00'] });
   st.slots = [null, null, null];
   st.columns = [[crew(0, 0, 20), crew(1, 0, 20), crew(2, 0, 20)]];
   const at = [];
   const r = onClock(st, 600, b => { if (!b.columns[0].length) return -1; at.push(b.tick); return 0; });
   assert.equal(r.win, true);
-  assert.deepEqual(at, [0, 24, 48]);
+  assert.deepEqual(at, [0, 18, 36]);
   assert.ok(r.seconds < r.ticks / 30 && r.seconds > r.ticks / 90, `${r.ticks} ticks in ${r.seconds} s: some at 3x, not all`);
   assert.equal(firingTime(st, [0, 0, 0]), onClock(st, 0, b => (b.columns[0].length ? 0 : -1)).seconds, 'firingTime is the same clock');
-  // 150 ms apart (the hasty players), every send lands before the next.
+  // 150 ms apart (the hasty players) is 4.5 ticks. A tap lands at its real time, between ticks when
+  // that is when it falls: the second send goes between ticks four and five, while the first crew
+  // member is still landing. The tick under way keeps the half already run, so the third send comes
+  // just after tick nine (27 ninetieths of a second), not after tick ten.
   const sends = [];
   const four = cloneBoard(st);
   four.slots = [null, null, null, null];
   onClock(four, 150, b => { if (!b.columns[0].length) return -1; sends.push(b.tick); return 0; });
-  assert.deepEqual(sends, [0, 5, 10]);
+  assert.deepEqual(sends, [0, 4, 9]);
 });
 
 test('the forecast follower wins less without undo than with it, and its undos are counted', () => {

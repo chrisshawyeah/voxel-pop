@@ -53,12 +53,12 @@ until the first hold. Only time on screen counts toward the 2.5 seconds: not whi
 hidden (out of room, a win, a message over it, the page in the background). The browser
 remembers each once it has been seen (`crumble-crew.taught`).
 
-The rules and the shots run three times as fast while the player is only waiting: while there is
-nothing to send (every pad taken, or every line empty), and once nobody has touched the screen or
-a key for half a second, even with a pad free. They drop back to normal the moment a finger goes
-down (and stay there while it is down), and never run faster than normal while a crew member is
-still landing on its pad, so its flight up always ends before its first shot (`pace()` in
-`js/logic.js`).
+The rules and the shots run three times as fast only while there is nothing to send (every pad
+taken, or every line empty); with a pad free and crew in a line they run at normal speed however
+long the player takes to choose. They drop back to normal the moment a finger goes down (and stay
+there while it is down, even with every pad taken), and never run faster than normal while a crew
+member is still landing on its pad, so its flight up always ends before its first shot (`pace()`
+in `js/logic.js`).
 
 There are no coins, power-ups, menus or ads. Just 20 levels.
 
@@ -120,7 +120,7 @@ No build step and nothing to install. Every file is plain JavaScript the browser
 | The colours | `COLORS` at the top of `js/models.js`. No two colours in one sculpture should be easy to mix up, since crew are told apart by colour alone. |
 | The rules: what can be hit, which cube a shot takes, when you are out of room | `js/logic.js` |
 | What a win, a clean clear, a loss and the ending do, shot speed | `js/main.js` (`FIRE_GAP`, `LAND`, `NEXT_AFTER`, `win()`, `ending()`, `jam()`, `tick()`); how long a shot flies is `FLIGHT` in `js/logic.js` |
-| The 3x speed-up: when, and how fast | `pace()`, `FAST` and `IDLE_MS` in `js/logic.js` (the game and the timed test players both ask it before every tick) |
+| The 3x speed-up: when, and how fast | `pace()` and `FAST` in `js/logic.js` (the game and the timed test players both ask it before every tick) |
 | Undo, the undo count, and the attempt kept in storage | `Attempt` in `js/logic.js` (a copy of the board before each send; `save()` and `restore()`); `undo()`, `saveAttempt()`, `savedAttempt()` in `js/main.js`. Change `RULES` in `js/logic.js` when a rules change makes old saves wrong |
 | Ready and covered fronts, asleep crew, the forecast marks and words, press and hold, the progress bar | `showReach()`, `forecastFor()`, `frontEvents()`, `inspect()` and `progress()` in `js/main.js` (`HOLD_MS`; `marksShown()`: levels up to `TEACH_UNTIL` always, the rest until the first hold); the forecast itself, strands and all, is `forecast()` and `fates()` in `js/logic.js`; their look in `css/game.css` |
 | The line preview, the lessons, the star | `preview()`, `teach()` and `showStar()` in `js/main.js` |
@@ -140,7 +140,8 @@ knowing only what the screen shows (every line, through the preview, and a "?" a
 it reaches the front), and a *greedy* player that sends any crew member that can shoot right
 now. A level is right when the planning player wins it with a line that also wins when the
 sends overlap in time (played 0, 150, 300 and 600 ms apart with the game's landing pause and the
-game's own clock, the 3x speed-up included, shots still in the air: `playLine()` on `onClock()`),
+game's own clock, the 3x speed-up included, shots still in the air, each tap at its real time,
+between two ticks when that is when it falls: `playLine()` on `onClock()`),
 and the greedy player wins about as often as the level's `greedy` band says. Beside it: a *hasty
 greedy* player, tapping whatever is ready every 150 ms (it may win at most 10 points more than
 the greedy one, and from level 2 on it must lose sometimes); a *forecast follower* that sends

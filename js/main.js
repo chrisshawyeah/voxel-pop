@@ -68,8 +68,7 @@ let previewOf = -1;          // the line whose preview is open, -1 when none
 let newBuild = '';           // a new version of the game is live and every file of it is fetched; it loads at the next level boundary
 let dragged = 0;             // how far the last press on the sculpture moved, in pixels
 let speed = 1;               // 1, or R.FAST (R.pace in js/logic.js)
-let quiet = 0;               // real seconds since a finger or the mouse last went down or up, or a key was pressed
-const pressed = new Set();   // the pointers down now: while one is, the ticks never speed up for quiet
+const pressed = new Set();   // the pointers down now: while one is, the ticks run at 1x (R.pace)
 let clearedMask = Number(store.get(CLEARED_KEY)) || 0; // kept here too, so a visit with storage blocked still counts
 let cleanMask = Number(store.get(CLEAN_KEY)) || 0;
 let allCleared = Number(store.get(DONE_KEY)) || 0;
@@ -651,18 +650,16 @@ function undo() {
 // The rules run in ticks of FIRE_GAP (R.tickGame in js/logic.js): the shots that are due land, then
 // every pad that can fire sends one. The screen only draws what each tick did, on the same clock.
 // Before every tick R.pace() says how fast it runs: R.FAST times as fast while there is nothing to
-// send (every pad taken, or every line empty) or nobody has touched the screen or a key for
-// R.IDLE_MS, back to 1x the moment a finger goes down (and while it stays down), and never faster
-// than 1x while a crew member is still landing on its pad. The test players keep the same clock
-// (tools/players.mjs).
+// send (every pad taken, or every line empty), otherwise 1x however long the player thinks; 1x
+// while a finger is down, and never faster than 1x while a crew member is still landing on its
+// pad. The test players keep the same clock (tools/players.mjs).
 function tick(dt) {
   let left = dt; // real seconds of this frame still to run
-  const still = !pressed.size;
   for (;;) {
-    speed = R.pace(st, still ? quiet * 1000 : 0);
+    speed = R.pace(st, pressed.size > 0);
     const need = (FIRE_GAP - clock) / speed; // real seconds until the next tick
-    if (left < need) { clock += left * speed; quiet += left; break; }
-    left -= need; quiet += need; clock = 0;
+    if (left < need) { clock += left * speed; break; }
+    left -= need; clock = 0;
     const landing = st.slots.some(s => s && s.land > 0);
     const { landed, shots, gone } = R.tickGame(st);
     for (const shot of shots) launch(shot);
@@ -847,13 +844,12 @@ window.addEventListener('click', e => {
 }, true);
 window.addEventListener('keydown', e => { if (e.key === 'Escape') closePreview(); });
 // Every new press starts clean: a hold whose click never came (some browsers drop it after a long
-// press) must not swallow the next tap, wherever it lands. Every press, lift and key is also the
-// player moving, which brings the ticks back to 1x (R.pace): while a finger is down they stay there.
-window.addEventListener('pointerdown', e => { held = false; pressed.add(e.pointerId); quiet = 0; }, true);
-const lifted = e => { pressed.delete(e.pointerId); quiet = 0; };
+// press) must not swallow the next tap, wherever it lands. While a finger is down (holding a front,
+// turning the sculpture) the ticks run at 1x, even with every pad taken (R.pace).
+window.addEventListener('pointerdown', e => { held = false; pressed.add(e.pointerId); }, true);
+const lifted = e => { pressed.delete(e.pointerId); };
 window.addEventListener('pointerup', lifted, true);
 window.addEventListener('pointercancel', lifted, true);
-window.addEventListener('keydown', () => { quiet = 0; }, true);
 window.addEventListener('blur', () => pressed.clear()); // a lift that will never come
 
 let last = performance.now();

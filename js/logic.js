@@ -6,15 +6,14 @@
 // Time runs in ticks. In one tick every pad that can fire sends one shot. A shot picks its cube
 // when it leaves (that cube is then taken: no second shot aims at it) and the cube is removed,
 // opening the one under it, only when the shot lands, FLIGHT ticks later. The game runs one
-// tick every 1/30 s, or FAST times as often while the player is only waiting
+// tick every 1/30 s, or FAST times as often while there is nothing to send
 // (pace() below); the test players run the same ticks back to back, so a player who waits for
 // the pads to stop sees exactly the board the checks saw, and the timed ones keep the game's
 // clock (pace()) to play each winning line with the sends overlapping in time (tools/players.mjs).
 
 export const START_SLOTS = 5; // launch pads, unless the level says otherwise (pads: in levels.js)
 export const FLIGHT = 9;      // ticks from a shot leaving its pad to landing (9 x 1/30 s = 0.3 s)
-export const FAST = 3;        // how much faster the ticks run while the player is only waiting (pace)
-export const IDLE_MS = 500;   // milliseconds without a touch or a key after which the ticks run FAST
+export const FAST = 3;        // how much faster the ticks run while there is nothing to send (pace)
 // Which version of these rules a saved attempt was played under (js/main.js keeps it with the
 // save). Add one whenever a change here makes the same sends end on a different board, so a level
 // left half-played under the old rules starts again instead of coming back wrong.
@@ -252,16 +251,15 @@ export function tickGame(st) {
   return r;
 }
 
-// How fast the next tick runs, 1 or FAST, with `quietMs` the real milliseconds since the player last
-// touched the screen or pressed a key (0 while a finger is down). The game
-// (js/main.js tick()) and the timed test players (tools/players.mjs) both ask this before every
-// tick. Normal speed while any crew member is still landing, so its flight up to the pad (120 ms)
-// always ends before its first shot; otherwise FAST while there is nothing to send (every pad
-// taken, or every line empty) or the player has been still for IDLE_MS; otherwise normal speed.
-export function pace(st, quietMs) {
-  if (st.slots.some(s => s && s.land > 0)) return 1;
-  if (freeSlot(st) < 0 || st.columns.every(c => !c.length)) return FAST;
-  return quietMs >= IDLE_MS ? FAST : 1;
+// How fast the next tick runs, 1 or FAST, with `down` true while a finger (or a mouse button) is
+// down. The game (js/main.js tick()) and the timed test players (tools/players.mjs) both ask this
+// before every tick. Normal speed while a finger is down, and while any crew member is still
+// landing, so its flight up to the pad (120 ms) always ends before its first shot; otherwise FAST
+// while there is nothing to send (every pad taken, or every line empty); otherwise normal speed,
+// however long the player takes to choose.
+export function pace(st, down = false) {
+  if (down || st.slots.some(s => s && s.land > 0)) return 1;
+  return freeSlot(st) < 0 || st.columns.every(c => !c.length) ? FAST : 1;
 }
 
 // Nothing would change in a tick but the clock: no shot in the air, nobody landing, nothing that
