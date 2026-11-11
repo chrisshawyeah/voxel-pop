@@ -17,9 +17,9 @@ const board = (page: any) =>
     };
   });
 
-// The rule. "can-hit": the first line whose front's colour has a cube with nothing on top (the
-// screen shows it ready); when none has and nothing is moving, the first line. "buried": the
-// first line whose front's colour is all under other cubes (the screen shows it covered).
+// The rule. "can-hit": the first line whose front's colour has a cube on the outside (the screen
+// shows it ready); when none has and nothing is moving, the first line. "buried": the first line
+// whose front's colour is all hidden inside, under other cubes (the screen shows it covered).
 // -1 when the rule sends nothing now.
 const pickLine = (page: any, want: "can-hit" | "buried") =>
   page.evaluate((want: string) => {
@@ -401,9 +401,9 @@ export const journeys = [
       {
         caption: "Undo while shots fly",
         run: async (ctx: any) => {
-          // The moment is made, not waited for: level 1 opens two colours at once, so with one ready
-          // crew member sent, a cube pops while its shots still fly, another front is ready and a
-          // pad is free, within a second or two.
+          // The moment is made, not waited for: level 1 shows all three colours on the outside from
+          // the start, so with one ready crew member sent, a cube pops while its shots still fly,
+          // another front is ready and a pad is free, within a second or two.
           await ctx.page.evaluate(() => (window as any).crumble.start(0));
           await whole(ctx.page, 0);
           if (!(await send(ctx.page, "can-hit"))) throw new Error("level 1 has no ready crew member to send");
