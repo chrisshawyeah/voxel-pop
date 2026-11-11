@@ -1,10 +1,12 @@
 // Test players for measuring a level, using the same rules and ticks as the game (js/logic.js).
-// greedy and plan wait for the pads to stop before each send; playLine and hastyGreedy (below)
-// send while shots are still in the air, with the game's landing pause, as a quick player does.
+// greedy and plan wait for the pads to stop before each send; playLine, hastyGreedy and
+// hastyForecast (below) send while shots are still in the air, with the game's landing pause and
+// the game's own clock (pace() in js/logic.js: a tick runs three times as fast while the player is
+// only waiting), as a quick player does.
 //
 // greedy: sends the front of any line whose colour can be hit right now, picked at random
 //   among those; when none can be hit, any front at random. This is "send whatever can shoot".
-//   Its win rate over many plays is how hard a level is.
+//   Its win rate over many plays is how hard a level is for a player who does not plan.
 // plan: a real search over which line to send next (depth-first, best-looking send first,
 //   remembering boards it has already judged). It knows only what the player can find on the
 //   screen: every crew member in every line (a tap behind the front of a line shows the whole
@@ -12,62 +14,78 @@
 //   lists them), never which is where: when a send turns a "?" into the front of its line, the
 //   plan has to win whichever of the still-hidden crew it turns out to be. So a level it wins
 //   never needs a guess about a "?". It does see inside the sculpture, which the screen shows
-//   only through the finishes-or-parks mark under each front (js/logic.js forecast()).
-// forecastFirst, hastyForecast and backtrack (further down) play by that mark, the way a player
-// who reads it does: they measure how much of a level the mark plays for you.
-import { cloneBoard, deploy, settle, isWon, freeSlot, tickGame, isJammed, busy, forecast } from '../js/logic.js';
+//   only through the forecast on each front (js/logic.js forecast()).
+// forecastFirst, hastyForecast and backtrack (further down) play by that forecast, the way a
+// player who reads it does: they measure how much of a level the forecast plays for you.
+import { cloneBoard, deploy, settle, isWon, freeSlot, tickGame, isJammed, busy, forecast, fates, pace } from '../js/logic.js';
 import { rng } from '../js/levels.js';
 
-// The game's landing pause (LAND in js/main.js) and the gaps a quick player leaves between two
-// sends, in ticks of 1/30 s: 0, 150, 300 and 600 ms.
+// The game's landing pause (LAND in js/main.js) in ticks, and the gaps a quick player leaves
+// between two taps, in milliseconds.
 export const LAND = 5;
-export const GAPS = [0, 5, 9, 18];
-export const HASTY_GAP = 5; // the hasty greedy player taps every 150 ms
+export const GAPS = [0, 150, 300, 600];
+export const HASTY_GAP = 150; // the hasty players tap every 150 ms
 
-// Plays `line` (which line to send, in order) with the game's ticks and landing pause, without
-// waiting for the pads to stop: each send goes `gap` ticks after the one before, or as soon as a
-// pad is free after that. True when it wins. A deal whose winning line loses at one of GAPS
-// needs the player to wait at the right moments, which the screen does not ask for.
-export function playLine(board, line, gap, land = LAND) {
+// The game's clock for the timed players. Time is kept in ninetieths of a second: a tick at
+// normal speed takes 3 of them, at 3x one (pace() in js/logic.js, asked before every tick as the
+// game asks it), so every gap lands on the same tick it would in the game. The player's own taps
+// are the only input: `quiet` is the time since the last one.
+const units = ms => (ms * 90) / 1000;
+const tickLength = (st, quiet) => 3 / pace(st, (quiet * 1000) / 90); // this tick, in ninetieths of a second
+
+// Plays a board on the game's clock, with the game's ticks and landing pause, without waiting for
+// the pads to stop: once `gap` ms have passed since the last tap and a pad is free, it asks
+// `choose(st)` for a line to send (-1: none now) and sends it at once; when nothing is chosen it
+// asks again on the next tick, or, `patient`, `gap` ms later (a player reading the forecast looks
+// again at the same pace it taps). It ends when the board is won or out of room, or when nothing is
+// chosen and nothing moves. { win, sends, seconds, ticks } (seconds of the game's clock, and rule
+// ticks, until it ended).
+export function onClock(board, gap, choose, land = LAND, patient = false) {
   const st = cloneBoard(board);
-  let k = 0, wait = 0;
+  const g = units(gap);
+  let quiet = Infinity, sends = 0, t = 0, ask = 0;
+  const end = win => ({ win, sends, seconds: t / 90, ticks: st.tick });
   for (;;) {
-    if (isWon(st)) return true;
-    if (k < line.length && wait <= 0 && freeSlot(st) >= 0) {
-      if (!deploy(st, line[k++], land)) return false;
-      wait = gap;
-      continue;
+    if (isWon(st)) return end(true);
+    if (isJammed(st)) return end(false);
+    if (quiet >= g && t >= ask && freeSlot(st) >= 0) {
+      const ci = choose(st);
+      if (ci >= 0) {
+        if (!deploy(st, ci, land)) return end(false);
+        sends++;
+        quiet = 0;
+        continue;
+      }
+      if (!busy(st)) return end(false); // nothing to send and nothing moving: nothing will change
+      if (patient) ask = t + g;
     }
-    if (k < line.length ? isJammed(st) : !busy(st)) return isWon(st);
+    const u = tickLength(st, quiet);
     tickGame(st);
-    wait--;
+    quiet += u; t += u;
   }
 }
 
-// greedy in a hurry: every `gap` ticks it sends a front whose colour can be hit right now (at
+// Plays `line` (which line to send, in order) on the game's clock: each send goes `gap` ms after
+// the one before, or as soon as a pad is free after that. True when it wins. A deal whose winning
+// line loses at one of GAPS needs the player to wait at the right moments, which the screen does
+// not ask for.
+export function playLine(board, line, gap, land = LAND) {
+  let k = 0;
+  return onClock(board, gap, () => (k < line.length ? line[k++] : -1), land).win;
+}
+
+// greedy in a hurry: every `gap` ms it sends a front whose colour can be hit right now (at
 // random among those) into a free pad, with shots still in the air and crew still landing; only
 // when nothing moves and nothing can be hit does it send any front. This is a player who taps
 // whatever is ready as fast as it lights up.
 export function hastyGreedy(board, rand, gap = HASTY_GAP, land = LAND) {
-  const st = cloneBoard(board);
-  let wait = 0;
-  for (;;) {
-    if (isWon(st)) return true;
-    if (isJammed(st)) return false;
-    if (wait <= 0 && freeSlot(st) >= 0) {
-      const fronts = [];
-      st.columns.forEach((c, i) => { if (c.length) fronts.push(i); });
-      const open = fronts.filter(i => st.exposed[st.columns[i][0].color].size > 0);
-      const pick = open.length ? open : busy(st) ? [] : fronts;
-      if (pick.length) {
-        deploy(st, pick[Math.floor(rand() * pick.length)], land);
-        wait = gap;
-        continue;
-      }
-    }
-    tickGame(st);
-    wait--;
-  }
+  return onClock(board, gap, st => {
+    const fronts = [];
+    st.columns.forEach((c, i) => { if (c.length) fronts.push(i); });
+    const open = fronts.filter(i => st.exposed[st.columns[i][0].color].size > 0);
+    const pick = open.length ? open : busy(st) ? [] : fronts;
+    return pick.length ? pick[Math.floor(rand() * pick.length)] : -1;
+  }, land).win;
 }
 
 export function hastyRate(board, rand, plays = 200) {
@@ -106,29 +124,36 @@ export const hastyCheck = board => hastyRate(board, rng(778), GREEDY_PLAYS);
 // True when the planning player's winning line also wins at every gap in GAPS.
 export const lineHolds = (board, line) => GAPS.every(gap => playLine(board, line, gap));
 
-// ---------- players who follow the finishes-or-parks mark (js/logic.js forecast()) ----------
-// The order such a player tries the fronts in: those marked to finish (a tick), in random order;
-// then the ready ones that would park, fewest left first; then the rest, in random order. A front
-// already tried from this board (`skip`) is left out. The mark is what the screen shows: on levels
-// 1 to 3 always, from level 4 on a press and hold away.
+// ---------- players who follow the forecast (js/logic.js forecast()) ----------
+// The order such a player tries the fronts in: those forecast to finish and strand nobody (a tick),
+// in random order; then those that leave crew parked but finish or are ready, fewest crew left
+// parked first (the sent one if it parks, and those it strands), then fewest shots left with them;
+// then the rest, in random order. A front already tried from this board (`skip`) is left out. The
+// forecast is what the screen shows: on levels 1 to 3 always, from level 4 a press and hold away
+// once the player has learned the hold (js/main.js marksShown()).
 export function byForecast(st, rand, land = LAND, skip = null) {
+  const base = st.slots.some(Boolean) ? fates(st) : new Map(); // where the crew on the pads are going
   const seen = new Map(); // crew of the same colour and number fare the same
-  const ticks = [], parks = [], rest = [];
+  const ticks = [], others = [], rest = [];
   st.columns.forEach((c, ci) => {
     if (!c.length || (skip && skip.has(ci))) return;
     const k = `${c[0].color}:${c[0].count}`;
-    if (!seen.has(k)) seen.set(k, forecast(st, ci, land));
+    if (!seen.has(k)) seen.set(k, forecast(st, ci, land, base));
     const f = seen.get(k);
-    if (f && f.finishes) ticks.push(ci);
-    else if (f && st.exposed[c[0].color].size) parks.push([f.left, rand(), ci]);
-    else rest.push(ci);
+    if (f && f.finishes && !f.strands.length) ticks.push(ci);
+    else if (f && (f.finishes || st.exposed[c[0].color].size)) {
+      const parked = (f.finishes ? 0 : 1) + f.strands.length;
+      const left = (f.finishes ? 0 : f.left) + f.strands.reduce((n, s) => n + s.left, 0);
+      others.push([parked, left, rand(), ci]);
+    } else rest.push(ci);
   });
   const shuffle = a => { for (let k = a.length - 1; k > 0; k--) { const j = Math.floor(rand() * (k + 1)); [a[k], a[j]] = [a[j], a[k]]; } return a; };
-  return { ticks: shuffle(ticks), parks: parks.sort((a, b) => a[0] - b[0] || a[1] - b[1]).map(p => p[2]), rest: shuffle(rest) };
+  return { ticks: shuffle(ticks), others: others.sort((a, b) => a[0] - b[0] || a[1] - b[1] || a[2] - b[2]).map(p => p[3]), rest: shuffle(rest) };
 }
+const order = o => [...o.ticks, ...o.others, ...o.rest];
 
-// Waits for the pads to stop, then sends by the mark: a tick if there is one, else the ready front
-// that parks with fewest left, else any front. Never undoes. { win, sends }.
+// Waits for the pads to stop, then sends by the forecast: a clean tick if there is one, else the
+// front that leaves the least parked, else any front. Never undoes. { win, sends }.
 export function forecastFirst(board, rand, land = LAND) {
   const st = cloneBoard(board);
   let sends = 0;
@@ -136,34 +161,19 @@ export function forecastFirst(board, rand, land = LAND) {
     settle(st);
     if (isWon(st)) return { win: true, sends };
     if (isJammed(st)) return { win: false, sends };
-    const o = byForecast(st, rand, land);
-    deploy(st, [...o.ticks, ...o.parks, ...o.rest][0], land);
+    deploy(st, order(byForecast(st, rand, land))[0], land);
     sends++;
   }
 }
 
-// The same player in a hurry: every `gap` ticks, with shots in the air, it sends a front marked to
-// finish into a free pad; only when none is and nothing moves does it send the best of the rest.
-// Never undoes. { win, sends }.
+// The same player in a hurry, on the game's clock: every `gap` ms, with shots in the air, it looks
+// at the forecasts and sends a front forecast to finish and strand nobody into a free pad; only
+// when none is and nothing moves does it send the best of the rest. Never undoes. { win, sends }.
 export function hastyForecast(board, rand, gap = HASTY_GAP, land = LAND) {
-  const st = cloneBoard(board);
-  let wait = 0, sends = 0;
-  for (;;) {
-    if (isWon(st)) return { win: true, sends };
-    if (isJammed(st)) return { win: false, sends };
-    if (wait <= 0 && freeSlot(st) >= 0) {
-      const o = byForecast(st, rand, land);
-      const ci = o.ticks.length ? o.ticks[0] : busy(st) ? -1 : [...o.parks, ...o.rest][0];
-      if (ci !== undefined && ci >= 0) {
-        deploy(st, ci, land);
-        sends++;
-        wait = gap;
-        continue;
-      }
-    }
-    tickGame(st);
-    wait--;
-  }
+  return onClock(board, gap, st => {
+    const o = byForecast(st, rand, land);
+    return (o.ticks.length ? o.ticks[0] : busy(st) ? -1 : order(o)[0]) ?? -1;
+  }, land, true);
 }
 
 // The forecast-first player with undo: when it runs out of room it takes back its last send and
@@ -185,10 +195,7 @@ export function backtrack(board, rand, cap = 50, land = LAND) {
     const st = cur.st;
     if (isWon(st)) return { win: true, sends, undos };
     let ci;
-    if (!isJammed(st) && !lost.has(keyOf(st))) {
-      const o = byForecast(st, rand, land, cur.tried);
-      ci = [...o.ticks, ...o.parks, ...o.rest][0];
-    }
+    if (!isJammed(st) && !lost.has(keyOf(st))) ci = order(byForecast(st, rand, land, cur.tried))[0];
     if (ci === undefined) {
       lost.add(keyOf(st));
       if (!path.length || undos >= cap) return { win: false, sends, undos };
@@ -206,10 +213,42 @@ export function backtrack(board, rand, cap = 50, land = LAND) {
   }
 }
 
-// From level 9 on, following the mark without ever undoing must lose some of the time: at most
-// FORECAST_MAX % of the forecast-first player's plays win (the tests and tools/pick-deals.mjs).
-export const FORECAST_FROM = 8; // level 9, counted from 0
-export const FORECAST_MAX = 90;
+// ---------- the curve: how much the forecast plays for you, level by level ----------
+// Each level's `follow` band (js/levels.js) is the share of plays, in %, that the forecast
+// follower (forecastCheck: forecastFirst, never undoing) must win, and its `undos` the most undos
+// the median won play of the follower with undo (backtrackCheck) may take. Then, from one level to
+// the next: the forecast follower may win at most STEP_MAX points more than on the level before,
+// unless the level's band sits wholly above the band before it (a breather, like the melon); and
+// the median undos may rise by at most UNDO_RISE over the level before's and fall by at most
+// UNDO_FALL, so they climb in small steps (a breather is left out: the level after it is compared
+// with the level before it). The median jumps from 0 to a level's full depth once the follower
+// wins less than half the time, so the first hard level may rise by 3. curveMisses() lists what a set of measures
+// breaks; the tests, tools/difficulty.mjs and tools/pick-deals.mjs all use it.
+export const STEP_MAX = 20;
+export const UNDO_RISE = 3;
+export const UNDO_FALL = 1;
+export const isBreather = (defs, n) => n > 0 && defs[n].follow[0] > defs[n - 1].follow[1];
+// m[n] = { fc, undos } for level n (undos null when it never won; a level with no m[n] is not
+// checked). Each miss is { n, k, text }: level n breaks it, against level k (k = n for its own
+// band and undos).
+export function curveMisses(defs, m) {
+  const out = [];
+  for (let n = 0; n < defs.length; n++) {
+    if (!m[n]) continue;
+    const [lo, hi] = defs[n].follow;
+    const where = `level ${n + 1} (${defs[n].name})`;
+    if (m[n].fc < lo || m[n].fc > hi) out.push({ n, k: n, text: `${where}: the forecast follower wins ${m[n].fc}%, outside ${lo}-${hi}%` });
+    if (m[n].undos === null || m[n].undos > defs[n].undos) out.push({ n, k: n, text: `${where}: the backtracking player's median is ${m[n].undos ?? 'no win'} undos, more than ${defs[n].undos}` });
+    const p = n - 1;
+    if (p >= 0 && m[p] && !isBreather(defs, n) && m[n].fc > m[p].fc + STEP_MAX) out.push({ n, k: p, text: `${where}: the forecast follower wins ${m[n].fc}%, more than ${STEP_MAX} points over level ${n}'s ${m[p].fc}%` });
+    const q = p >= 1 && isBreather(defs, p) ? p - 1 : p; // the level after a breather is compared with the one before it
+    if (q >= 0 && m[q] && !isBreather(defs, n) && m[n].undos !== null && m[q].undos !== null) {
+      if (m[n].undos > m[q].undos + UNDO_RISE) out.push({ n, k: q, text: `${where}: ${m[n].undos} median undos, more than ${UNDO_RISE} over level ${q + 1}'s ${m[q].undos}` });
+      if (m[n].undos < m[q].undos - UNDO_FALL) out.push({ n, k: q, text: `${where}: ${m[n].undos} median undos, more than ${UNDO_FALL} under level ${q + 1}'s ${m[q].undos}` });
+    }
+  }
+  return out;
+}
 
 // How often, in %, the greedy player (waiting for the pads to stop before each send) leaves a crew
 // member parked on a pad after one of its first three sends, over `plays` plays from a fixed seed.
@@ -262,23 +301,11 @@ export const BACKTRACK_PLAYS = 40;
 export const backtrackCheck = board => measure(backtrack, board, 781, BACKTRACK_PLAYS);
 
 // How long a winning line takes to fire, in seconds of the game's clock, for a player who sends
-// the moment a pad is free (no thinking): the game runs its rules at FAST times speed while every
-// pad is taken or every line is empty (js/main.js), and at 1x otherwise.
-export const FAST = 3;
+// the moment a pad is free (no thinking); Infinity when it does not win.
 export function firingTime(board, line, land = LAND) {
-  const st = cloneBoard(board);
-  let k = 0, ticks1 = 0, ticksFast = 0;
-  for (;;) {
-    if (isWon(st)) break;
-    if (k < line.length && freeSlot(st) >= 0) {
-      if (!deploy(st, line[k++], land)) return Infinity;
-      continue;
-    }
-    if (k < line.length ? isJammed(st) : !busy(st)) return Infinity;
-    if (freeSlot(st) < 0 || st.columns.every(c => !c.length)) ticksFast++; else ticks1++;
-    tickGame(st);
-  }
-  return (ticks1 + ticksFast / FAST) / 30;
+  let k = 0;
+  const r = onClock(board, 0, () => (k < line.length ? line[k++] : -1), land);
+  return r.win ? r.seconds : Infinity;
 }
 
 const OUT = Symbol('out of budget');

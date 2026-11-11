@@ -20,31 +20,42 @@ import { makeBoard, cloneBoard, removeCube, revealLone, START_SLOTS, RULES, FLIG
 //           0 keeps them at the back, 0.5 ignores depth, 1 puts the deepest first. Higher is harder.
 //   greedy  [lowest, highest] share of plays, in %, that a player who sends any crew that can
 //           shoot right now should win. The tests check it (tools/players.mjs).
+//   follow  [lowest, highest] share of plays, in %, that a player who sends whatever the forecast
+//           says finishes, and never undoes, should win: the curve. Levels 1 to 3 teach (95-100),
+//           4 to 8 rise gently (within 75-90), 9 to 14 are the middle (within 45-70), 15 to 20 are
+//           hard (within 25-45), each band a little lower than the one before, and the melon is the
+//           one breather (60-80). From one level to the next the follower may win at most 20 points
+//           more, unless the band itself sits above the one before it (the breather).
+//   undos   the most undos the same player with undo may need in its median won play: at most 3 up
+//           to level 12, at most 6 after. From one level to the next the median rises by at most 3
+//           and falls by at most 1 (the breather is left out). tools/players.mjs curveMisses checks
+//           all of it.
 //   opening 'park' (optional): most players park a crew member on a pad in their first three sends
 //           and have to free it (tools/players.mjs earlyParks). Levels 2 and 3 teach parking this way.
 //   deal    which deal of these settings is played. Picked by `node tools/pick-deals.mjs`, which
-//           tries deals until a careful player wins and the greedy share lands in `greedy`.
+//           tries deals until a careful player wins and the greedy, follow and undos measures
+//           land where the line says.
 export const LEVELS = [
-  { name: 'Toadstool', model: 'mushroom', cols: 3, pads: 5, crew: [40, 60], hidden: 0, mix: 0, flip: 0, greedy: [95, 100], deal: 0 },
-  { name: 'Bath Duck', model: 'duck', cols: 4, pads: 4, crew: [50, 80], hidden: 0, mix: 0, flip: 0.5, greedy: [85, 95], opening: 'park', deal: 15 },
-  { name: 'Penguin', model: 'penguin', cols: 4, pads: 4, crew: [60, 90], hidden: 0, mix: 0, flip: 0.4, greedy: [85, 95], opening: 'park', deal: 7 },
-  { name: 'Hot-Air Balloon', model: 'balloon', cols: 4, pads: 5, crew: [40, 70], hidden: 0, mix: 0.1, flip: 0.8, greedy: [70, 90], deal: 18 },
-  { name: 'Robot', model: 'robot', cols: 5, pads: 5, crew: [50, 70], hidden: 0, mix: 0, flip: 0, greedy: [70, 90], deal: 2 },
-  { name: 'Fish', model: 'fish', cols: 4, pads: 5, crew: [30, 50], hidden: 1, mix: 0.3, flip: 0, greedy: [70, 90], deal: 13 },
-  { name: 'Cactus', model: 'cactus', cols: 4, pads: 5, crew: [40, 60], hidden: 1, mix: 0, flip: 0, greedy: [70, 90], deal: 1 },
-  { name: 'Burger', model: 'burger', cols: 4, pads: 5, crew: [50, 80], hidden: 1, mix: 0.3, flip: 0, greedy: [70, 90], deal: 10 },
-  { name: 'Lighthouse', model: 'lighthouse', cols: 5, pads: 5, crew: [50, 70], hidden: 1, mix: 0.3, flip: 0, greedy: [40, 70], deal: 5 },
-  { name: 'Gift Box', model: 'gift', cols: 5, pads: 5, crew: [40, 70], hidden: 2, mix: 0.3, flip: 0.4, greedy: [40, 70], deal: 5 },
-  { name: 'Rocket', model: 'rocket', cols: 5, pads: 5, crew: [30, 50], hidden: 2, mix: 0.3, flip: 0.4, greedy: [40, 70], deal: 17 },
-  { name: 'Snowman', model: 'snowman', cols: 5, pads: 5, crew: [50, 80], hidden: 2, mix: 0.3, flip: 0.4, greedy: [40, 70], deal: 2 },
-  { name: 'Cupcake', model: 'cupcake', cols: 5, pads: 5, crew: [40, 60], hidden: 2, mix: 0.3, flip: 0.4, greedy: [40, 70], deal: 9 },
-  { name: 'Tree', model: 'tree', cols: 5, pads: 4, crew: [40, 60], hidden: 2, mix: 0, flip: 0, greedy: [40, 70], deal: 4 },
-  { name: 'House', model: 'house', cols: 4, pads: 4, crew: [60, 90], hidden: 2, mix: 0.45, flip: 0, greedy: [15, 45], deal: 17 },
-  { name: 'Nesting Dolls', model: 'dolls', cols: 5, pads: 5, crew: [60, 100], hidden: 2, mix: 0, flip: 0.5, greedy: [15, 45], deal: 3 },
-  { name: 'Melon', model: 'melon', cols: 3, pads: 5, crew: [30, 50], hidden: 1, mix: 0.1, flip: 0.5, greedy: [70, 85], deal: 0 },
-  { name: 'Castle', model: 'castle', cols: 5, pads: 4, crew: [60, 100], hidden: 3, mix: 0.3, flip: 0.4, greedy: [15, 45], deal: 3 },
-  { name: 'Patchwork', model: 'patchwork', cols: 5, pads: 3, crew: [40, 60], hidden: 2, mix: 0.3, flip: 0.4, greedy: [15, 45], deal: 41 },
-  { name: 'Ringed Planet', model: 'planet', cols: 4, pads: 5, crew: [60, 100], hidden: 3, mix: 0.45, flip: 0.4, greedy: [15, 45], deal: 17 },
+  { name: 'Toadstool', model: 'mushroom', cols: 3, pads: 5, crew: [40, 60], hidden: 0, mix: 0, flip: 0, greedy: [95, 100], follow: [95, 100], undos: 0, deal: 0 },
+  { name: 'Bath Duck', model: 'duck', cols: 4, pads: 4, crew: [50, 80], hidden: 0, mix: 0, flip: 0.5, greedy: [85, 95], follow: [95, 100], undos: 0, opening: 'park', deal: 15 },
+  { name: 'Penguin', model: 'penguin', cols: 4, pads: 4, crew: [60, 90], hidden: 0, mix: 0, flip: 0.4, greedy: [85, 95], follow: [95, 100], undos: 0, opening: 'park', deal: 7 },
+  { name: 'Hot-Air Balloon', model: 'balloon', cols: 4, pads: 5, crew: [40, 70], hidden: 0, mix: 0.1, flip: 0.8, greedy: [70, 90], follow: [80, 90], undos: 1, deal: 18 },
+  { name: 'Robot', model: 'robot', cols: 5, pads: 5, crew: [50, 70], hidden: 0, mix: 0, flip: 0, greedy: [70, 90], follow: [79, 89], undos: 1, deal: 2 },
+  { name: 'Fish', model: 'fish', cols: 4, pads: 5, crew: [30, 50], hidden: 1, mix: 0.3, flip: 0.2, greedy: [70, 90], follow: [78, 88], undos: 1, deal: 35 },
+  { name: 'Cactus', model: 'cactus', cols: 4, pads: 5, crew: [40, 60], hidden: 1, mix: 0, flip: 0, greedy: [70, 90], follow: [76, 86], undos: 1, deal: 1 },
+  { name: 'Burger', model: 'burger', cols: 4, pads: 5, crew: [50, 80], hidden: 1, mix: 0.2, flip: 0, greedy: [70, 90], follow: [75, 85], undos: 1, deal: 17 },
+  { name: 'Lighthouse', model: 'lighthouse', cols: 5, pads: 5, crew: [50, 70], hidden: 1, mix: 0.45, flip: 0, greedy: [40, 70], follow: [58, 70], undos: 3, deal: 24 },
+  { name: 'Gift Box', model: 'gift', cols: 5, pads: 5, crew: [40, 70], hidden: 2, mix: 0.3, flip: 0.4, greedy: [40, 70], follow: [55, 68], undos: 3, deal: 5 },
+  { name: 'Rocket', model: 'rocket', cols: 5, pads: 5, crew: [30, 50], hidden: 2, mix: 0.2, flip: 0.4, greedy: [40, 70], follow: [52, 65], undos: 3, deal: 17 },
+  { name: 'Snowman', model: 'snowman', cols: 5, pads: 5, crew: [50, 80], hidden: 2, mix: 0.2, flip: 0.6, greedy: [40, 70], follow: [50, 62], undos: 3, deal: 16 },
+  { name: 'Cupcake', model: 'cupcake', cols: 5, pads: 5, crew: [40, 60], hidden: 2, mix: 0.3, flip: 0.4, greedy: [40, 70], follow: [47, 58], undos: 4, deal: 26 },
+  { name: 'Tree', model: 'tree', cols: 5, pads: 4, crew: [40, 60], hidden: 2, mix: 0.2, flip: 0, greedy: [40, 70], follow: [45, 55], undos: 4, deal: 27 },
+  { name: 'House', model: 'house', cols: 4, pads: 4, crew: [50, 80], hidden: 2, mix: 0.6, flip: 0, greedy: [15, 45], follow: [36, 45], undos: 5, deal: 10 },
+  { name: 'Nesting Dolls', model: 'dolls', cols: 5, pads: 5, crew: [60, 100], hidden: 2, mix: 0, flip: 0.5, greedy: [15, 45], follow: [33, 45], undos: 5, deal: 3 },
+  { name: 'Melon', model: 'melon', cols: 3, pads: 5, crew: [30, 50], hidden: 1, mix: 0.1, flip: 0.5, greedy: [70, 85], follow: [60, 80], undos: 2, deal: 0 },
+  { name: 'Castle', model: 'castle', cols: 5, pads: 4, crew: [60, 100], hidden: 3, mix: 0.2, flip: 0.4, greedy: [15, 45], follow: [30, 42], undos: 6, deal: 8 },
+  { name: 'Patchwork', model: 'patchwork', cols: 5, pads: 3, crew: [40, 60], hidden: 2, mix: 0.1, flip: 0.6, greedy: [15, 45], follow: [27, 40], undos: 6, deal: 4 },
+  { name: 'Ringed Planet', model: 'planet', cols: 4, pads: 3, crew: [60, 100], hidden: 3, mix: 0.3, flip: 0.8, greedy: [15, 45], follow: [25, 38], undos: 6, deal: 8 },
 ];
 
 export const padsFor = def => def.pads || START_SLOTS;
@@ -158,14 +169,14 @@ export function dealLevel(def) {
   return { def, model, board, shooters: crew.length, hidden };
 }
 
-// A short fingerprint of a level as dealt: its settings, its sculpture, its crew and lines, its
-// pads and the rules' version. A saved attempt carries it (js/main.js), so a save made before
+// A short fingerprint of a level as dealt: its settings, its sculpture (size and cubes), its crew
+// and lines, its pads and the rules' version. A saved attempt carries it (js/main.js), so a save made before
 // any of those changed is turned down instead of replayed onto a different puzzle.
 const prints = new Map();
 export function levelPrint(n) {
   const L = buildLevel(n);
   if (!prints.has(L.def)) {
-    const text = JSON.stringify([RULES, FLIGHT, L.def, Array.from(L.model.cells).join(''), L.model.palette,
+    const text = JSON.stringify([RULES, FLIGHT, L.def, [L.model.sx, L.model.sy, L.model.sz], Array.from(L.model.cells).join(''), L.model.palette,
       L.board.columns.map(col => col.map(s => [s.color, s.count, s.hidden ? 1 : 0])), L.board.slots.length]);
     let a = 0x811c9dc5, b = 0x9e3779b9;
     for (let i = 0; i < text.length; i++) {
