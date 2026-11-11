@@ -1,5 +1,5 @@
-// The main flow of the levels-only game: win a level, move between levels, run out of room and
-// undo.
+// The main flow of the levels-only game: win a level (cleanly), move between levels, come back
+// to a level after a reload, run out of room and undo.
 // The game is a canvas with buttons below it. The journeys choose what to send by a simple rule
 // read from the board the game exposes as window.crumble, then tap the front of that line with
 // a real click at its place on the screen, so a button that is hidden, covered or cut off fails.
@@ -19,7 +19,7 @@ const board = (page: any) =>
 
 // The rule. "can-hit": the first line whose front's colour has a cube with nothing on top (the
 // screen shows it ready); when none has and nothing is moving, the first line. "buried": the
-// first line whose front's colour is all under other cubes (the screen shows it asleep).
+// first line whose front's colour is all under other cubes (the screen shows it covered).
 // -1 when the rule sends nothing now.
 const pickLine = (page: any, want: "can-hit" | "buried") =>
   page.evaluate((want: string) => {
@@ -34,22 +34,21 @@ const pickLine = (page: any, want: "can-hit" | "buried") =>
     return want === "can-hit" && quiet && lines.length ? lines[0] : -1;
   }, want);
 
-// Who is where, as text: every line front to back and every pad. Two equal ones are the same board
-// as far as the player can tell (a "?" is marked).
-const where = (page: any) =>
-  page.evaluate(() => {
-    const g = (window as any).crumble;
-    const st = g.board;
-    return {
-      s: g.state, cleared: st.cleared,
-      lines: st.columns.map((c: any[]) => c.map((x: any) => `${x.color}:${x.count}${x.hidden ? "?" : ""}`).join(" ")).join(" | "),
-      pads: st.slots.map((x: any) => (x ? `${x.color}:${x.count}` : "_")).join(" "),
-    };
-  });
-const same = (a: any, b: any, what: string) => {
-  const diff = ["s", "cleared", "lines", "pads"].filter(k => a[k] !== b[k]);
+// The board in plain text (window.crumble.snapshot()): state, level, clock, cubes gone and which
+// (a hash), every line front to back (a "?" is marked), every pad, the shots in the air, sends and
+// undos. Two equal ones are the same board.
+const where = (page: any) => page.evaluate(() => (window as any).crumble.snapshot());
+const BOARD = ["state", "level", "cleared", "hash", "lines", "pads", "flying"];
+const same = (a: any, b: any, what: string, keys = BOARD) => {
+  const diff = keys.filter(k => a[k] !== b[k]);
   if (diff.length) throw new Error(`${what}: ${diff.map(k => `${k} is ${JSON.stringify(a[k])}, was ${JSON.stringify(b[k])}`).join("; ")}`);
 };
+// Nothing moving: no shot in the air, nobody landing, nobody on a pad who can fire.
+const quiet = (page: any) =>
+  page.evaluate(() => {
+    const st = (window as any).crumble.board;
+    return !st.flying.length && st.slots.every((s: any) => !s || (!(s.land > 0) && st.exposed[s.color].size === 0));
+  });
 
 // Fails unless every element matching `sel` lies inside the window.
 const inside = async (page: any, sel: string, what: string) => {
@@ -122,7 +121,7 @@ export const journeys = [
       { expect: "Level 1", caption: "Toadstool" },
       { expect: "Tap the front crew", caption: "What to do" },
       {
-        caption: "Ready crew shine",
+        caption: "Ready crew shine, and level 1 shows what each send would do",
         run: async (ctx: any) => {
           const wrong = await ctx.page.evaluate(() => {
             const st = (window as any).crumble.board;
@@ -131,10 +130,13 @@ export const journeys = [
               if (!c.length) return [];
               const el = cols[i]?.querySelector("button.front .crew");
               const open = st.exposed[c[0].color].size > 0;
-              return el && el.classList.contains(open ? "ready" : "asleep") ? [] : [i + 1];
+              const mark = el?.querySelector(".fc") as HTMLElement | null;
+              const label = el?.parentElement?.getAttribute("aria-label") || "";
+              const ok = el && el.classList.contains(open ? "ready" : "covered") && mark && !mark.hidden && /alone/.test(label);
+              return ok ? [] : [i + 1];
             });
           });
-          if (wrong.length) throw new Error(`line ${wrong.join(", ")}: ready and asleep do not match the board`);
+          if (wrong.length) throw new Error(`line ${wrong.join(", ")}: ready or covered does not match the board, or the finishes-or-parks mark is missing`);
         },
       },
       {
@@ -187,8 +189,19 @@ export const journeys = [
           throw new Error("level 1 was not won in 150 seconds");
         },
       },
+      { expect: "Clean clear", caption: "No undo: a clean clear" },
       { expect: "Level 2", caption: "Next level starts", highlight: true },
       { caption: "A whole duck", run: async (ctx: any) => { await whole(ctx.page, 1); } },
+      { click: "#prev", caption: "Back to level 1" },
+      {
+        caption: "Level 1 has its star",
+        run: async (ctx: any) => {
+          const s = await ctx.page.evaluate(() => ({ level: (window as any).crumble.level, clean: (window as any).crumble.clean, star: !document.getElementById("star")!.hidden }));
+          if (s.level !== 0 || !s.clean || !s.star) throw new Error(`level ${s.level + 1}: cleared clean ${s.clean}, star shown ${s.star}`);
+        },
+      },
+      { click: "#next", caption: "On to the duck" },
+      { caption: "Still a whole duck", run: async (ctx: any) => { await whole(ctx.page, 1); } },
     ],
   },
   {
@@ -200,6 +213,28 @@ export const journeys = [
       { goto: "/voxel-pop/?level=3", caption: "Level 3" },
       { click: "#next", caption: "Next level" },
       { expect: "Level 4", caption: "Level 4" },
+      {
+        caption: "From level 4 the forecast waits to be asked",
+        run: async (ctx: any) => {
+          const shown = await ctx.page.evaluate(() => Array.from(document.querySelectorAll("#queues .front .fc")).filter(e => !(e as HTMLElement).hidden).length);
+          if (shown) throw new Error(`${shown} fronts show the finishes-or-parks mark on level 4`);
+          const front = ctx.page.locator("#queues .col button.front").first();
+          await front.hover({ timeout: 5000 });
+          await ctx.page.waitForTimeout(200);
+          const tip = await ctx.page.evaluate(() => {
+            const t = document.querySelector("#queues .front .tip:not([hidden])") as HTMLElement | null;
+            return { text: t?.textContent || "", label: document.querySelector("#queues .col button.front")?.getAttribute("aria-label") || "" };
+          });
+          if (!/finishes alone|parks \d+ alone|no free pad/.test(tip.text)) throw new Error(`hovering a front shows "${tip.text}"`);
+          if (!/finishes alone|parks \d+ alone|no free pad/.test(tip.label)) throw new Error(`the front's name does not say what sending it would do: "${tip.label}"`);
+          await ctx.page.mouse.move(5, 5);
+          await ctx.page.waitForTimeout(200);
+          const left = await ctx.page.evaluate(() => document.querySelectorAll("#queues .front .tip:not([hidden])").length);
+          if (left) throw new Error("the forecast stayed after the mouse left");
+          const b = await board(ctx.page);
+          if (b.onPads) throw new Error("hovering sent a crew member");
+        },
+      },
       { click: "#prev", caption: "Back one" },
       { click: "#prev", caption: "Back again" },
       { expect: "Level 2", caption: "Level 2", highlight: true },
@@ -216,6 +251,30 @@ export const journeys = [
           }
         },
       },
+      {
+        caption: "A reload brings the level back as it was",
+        run: async (ctx: any) => {
+          const end = Date.now() + 30_000;
+          while (!(await quiet(ctx.page))) {
+            if (Date.now() > end) throw new Error("the board did not come to rest in 30 seconds");
+            await ctx.page.waitForTimeout(200);
+          }
+          const was = await where(ctx.page);
+          if (/[?&]level=/.test(ctx.page.url())) throw new Error(`the address still names a level after it was used: ${ctx.page.url()}`);
+          await ctx.page.reload();
+          await ctx.page.waitForFunction(() => (window as any).crumble && document.getElementById("loading")!.hidden, null, { timeout: 30_000 });
+          await ctx.page.waitForTimeout(300);
+          const now = await where(ctx.page);
+          same(now, was, "after the reload", [...BOARD, "sends", "undos"]);
+          if (now.tick < was.tick) throw new Error(`the clock came back at ${now.tick}, before ${was.tick}: the level went back to an earlier moment`);
+          const drawn = await ctx.page.evaluate(() => ({ ...(window as any).crumble.drawn, cubes2: (window as any).crumble.board.cells.filter(Boolean).length }));
+          if (drawn.cubes !== drawn.cubes2) throw new Error(`${drawn.cubes} cubes drawn for ${drawn.cubes2} on the board`);
+          await ctx.page.locator("#undo").click({ timeout: 5000 });
+          await ctx.page.waitForTimeout(200);
+          const back = await where(ctx.page);
+          if (back.sends !== was.sends - 1 || back.undos !== was.undos + 1) throw new Error(`after a reload, undo left ${back.sends} sends and ${back.undos} undos (was ${was.sends} and ${was.undos})`);
+        },
+      },
       { click: "#again", caption: "Start it again" },
       { expect: "Level 2", caption: "Still level 2" },
       { caption: "Fresh level", run: async (ctx: any) => { await whole(ctx.page, 1, ctx.state.crew as number); } },
@@ -229,6 +288,8 @@ export const journeys = [
               await ctx.page.waitForTimeout(400);
               await inside(ctx.page, "#queues .col .slot", `crew rows at ${width}x${height}`);
               await inside(ctx.page, "#pads .pad", `pads at ${width}x${height}`);
+              const h = await ctx.page.evaluate(() => document.getElementById("stage")!.getBoundingClientRect().height);
+              if (h < 140) throw new Error(`the sculpture gets ${Math.round(h)} px at ${width}x${height}, under 140`);
             }
           } finally {
             await ctx.page.setViewportSize(size);
@@ -306,6 +367,42 @@ export const journeys = [
       },
       { click: "#again", caption: "Start it again" },
       { caption: "The level starts over", run: async (ctx: any) => { await whole(ctx.page, ctx.state.level as number, ctx.state.crew as number); } },
+      {
+        caption: "Undo brings back popped cubes and shots in the air",
+        run: async (ctx: any) => {
+          const end = Date.now() + 30_000;
+          for (;;) {
+            const ok = await ctx.page.evaluate(() => {
+              const st = (window as any).crumble.board;
+              return st.cleared > 0 && st.flying.length > 0 && st.slots.some((s: any) => !s) &&
+                st.columns.some((c: any[]) => c.length && st.exposed[c[0].color].size > 0);
+            });
+            if (ok) break;
+            if (Date.now() > end) throw new Error("no moment with cubes popped, shots in the air and a ready crew member to send");
+            await ctx.page.waitForTimeout((await send(ctx.page, "can-hit")) ? 120 : 80);
+          }
+          // The board is read and the send made in one go, so not a tick passes in between; the
+          // same for the undo and the board it gives back.
+          const was = await ctx.page.evaluate(() => {
+            const g = (window as any).crumble, st = g.board;
+            const before = g.snapshot();
+            const i = st.columns.findIndex((c: any[]) => c.length && st.exposed[c[0].color].size > 0);
+            (document.querySelectorAll("#queues .col")[i].querySelector("button.front") as HTMLElement).click();
+            return { before, sends: g.sends };
+          });
+          if (was.sends !== was.before.sends + 1) throw new Error("the send did not go");
+          await ctx.page.waitForTimeout(500);
+          const back = await ctx.page.evaluate(() => {
+            (document.getElementById("undo") as HTMLElement).click();
+            const g = (window as any).crumble;
+            return { now: g.snapshot(), drawn: g.drawn, cubes: g.board.cells.filter(Boolean).length, flying: g.board.flying.length };
+          });
+          same(back.now, was.before, "after the undo", [...BOARD, "tick", "sends"]);
+          if (back.drawn.shots !== back.flying) throw new Error(`${back.drawn.shots} shots drawn in the air for ${back.flying} in the rules`);
+          if (back.drawn.cubes !== back.cubes) throw new Error(`${back.drawn.cubes} cubes drawn for ${back.cubes} on the board`);
+          if (back.now.undos !== was.before.undos + 1) throw new Error("the undo was not counted");
+        },
+      },
     ],
   },
 ];

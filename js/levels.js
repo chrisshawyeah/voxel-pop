@@ -2,7 +2,7 @@
 // This is the file to edit. Change a number, save, reload the page; then run
 // `node tools/pick-deals.mjs <level>` to pick a deal for the new settings (see README.md).
 import { MODELS } from './models.js';
-import { makeBoard, cloneBoard, removeCube, START_SLOTS } from './logic.js';
+import { makeBoard, cloneBoard, removeCube, revealLone, START_SLOTS, RULES, FLIGHT } from './logic.js';
 
 // One line per level, played top to bottom. Reorder, delete or copy lines freely.
 //   name    what the level is called on screen
@@ -20,12 +20,14 @@ import { makeBoard, cloneBoard, removeCube, START_SLOTS } from './logic.js';
 //           0 keeps them at the back, 0.5 ignores depth, 1 puts the deepest first. Higher is harder.
 //   greedy  [lowest, highest] share of plays, in %, that a player who sends any crew that can
 //           shoot right now should win. The tests check it (tools/players.mjs).
+//   opening 'park' (optional): most players park a crew member on a pad in their first three sends
+//           and have to free it (tools/players.mjs earlyParks). Levels 2 and 3 teach parking this way.
 //   deal    which deal of these settings is played. Picked by `node tools/pick-deals.mjs`, which
 //           tries deals until a careful player wins and the greedy share lands in `greedy`.
 export const LEVELS = [
   { name: 'Toadstool', model: 'mushroom', cols: 3, pads: 5, crew: [40, 60], hidden: 0, mix: 0, flip: 0, greedy: [95, 100], deal: 0 },
-  { name: 'Bath Duck', model: 'duck', cols: 3, pads: 5, crew: [40, 60], hidden: 0, mix: 0, flip: 0, greedy: [95, 100], deal: 0 },
-  { name: 'Penguin', model: 'penguin', cols: 3, pads: 5, crew: [40, 60], hidden: 0, mix: 0, flip: 0, greedy: [95, 100], deal: 0 },
+  { name: 'Bath Duck', model: 'duck', cols: 4, pads: 4, crew: [50, 80], hidden: 0, mix: 0, flip: 0.5, greedy: [85, 95], opening: 'park', deal: 15 },
+  { name: 'Penguin', model: 'penguin', cols: 4, pads: 4, crew: [60, 90], hidden: 0, mix: 0, flip: 0.4, greedy: [85, 95], opening: 'park', deal: 7 },
   { name: 'Hot-Air Balloon', model: 'balloon', cols: 4, pads: 5, crew: [40, 70], hidden: 0, mix: 0.1, flip: 0.8, greedy: [70, 90], deal: 18 },
   { name: 'Robot', model: 'robot', cols: 5, pads: 5, crew: [50, 70], hidden: 0, mix: 0, flip: 0, greedy: [70, 90], deal: 2 },
   { name: 'Fish', model: 'fish', cols: 4, pads: 5, crew: [30, 50], hidden: 1, mix: 0.3, flip: 0, greedy: [70, 90], deal: 13 },
@@ -36,12 +38,12 @@ export const LEVELS = [
   { name: 'Rocket', model: 'rocket', cols: 5, pads: 5, crew: [30, 50], hidden: 2, mix: 0.3, flip: 0.4, greedy: [40, 70], deal: 17 },
   { name: 'Snowman', model: 'snowman', cols: 5, pads: 5, crew: [50, 80], hidden: 2, mix: 0.3, flip: 0.4, greedy: [40, 70], deal: 2 },
   { name: 'Cupcake', model: 'cupcake', cols: 5, pads: 5, crew: [40, 60], hidden: 2, mix: 0.3, flip: 0.4, greedy: [40, 70], deal: 9 },
-  { name: 'Tree', model: 'tree', cols: 5, pads: 4, crew: [40, 60], hidden: 2, mix: 0, flip: 0, greedy: [40, 70], deal: 0 },
+  { name: 'Tree', model: 'tree', cols: 5, pads: 4, crew: [40, 60], hidden: 2, mix: 0, flip: 0, greedy: [40, 70], deal: 4 },
   { name: 'House', model: 'house', cols: 4, pads: 4, crew: [60, 90], hidden: 2, mix: 0.45, flip: 0, greedy: [15, 45], deal: 17 },
   { name: 'Nesting Dolls', model: 'dolls', cols: 5, pads: 5, crew: [60, 100], hidden: 2, mix: 0, flip: 0.5, greedy: [15, 45], deal: 3 },
-  { name: 'Melon', model: 'melon', cols: 3, pads: 5, crew: [60, 100], hidden: 2, mix: 0, flip: 0.5, greedy: [15, 45], deal: 6 },
+  { name: 'Melon', model: 'melon', cols: 3, pads: 5, crew: [30, 50], hidden: 1, mix: 0.1, flip: 0.5, greedy: [70, 85], deal: 0 },
   { name: 'Castle', model: 'castle', cols: 5, pads: 4, crew: [60, 100], hidden: 3, mix: 0.3, flip: 0.4, greedy: [15, 45], deal: 3 },
-  { name: 'Patchwork', model: 'patchwork', cols: 5, pads: 3, crew: [40, 60], hidden: 2, mix: 0.3, flip: 0.4, greedy: [15, 45], deal: 2 },
+  { name: 'Patchwork', model: 'patchwork', cols: 5, pads: 3, crew: [40, 60], hidden: 2, mix: 0.3, flip: 0.4, greedy: [15, 45], deal: 41 },
   { name: 'Ringed Planet', model: 'planet', cols: 4, pads: 5, crew: [60, 100], hidden: 3, mix: 0.45, flip: 0.4, greedy: [15, 45], deal: 17 },
 ];
 
@@ -136,20 +138,44 @@ export function dealLevel(def) {
   columns.forEach((col, ci) => col.forEach((s, k) => {
     col[k] = { id: id++, color: s.color, count: s.count, hidden: false, home: ci };
   }));
-  // Hidden crew: never the front of a line, never two in a row.
+  // Hidden crew: never the front of a line, never two in a row. When they are all the same crew,
+  // there is nothing to guess and they are shown from the start (revealLone in js/logic.js), so
+  // a level with one hidden crew member has no "?" on screen.
   const spots = [];
   columns.forEach((col, ci) => col.forEach((_, k) => { if (k > 0) spots.push([ci, k]); }));
-  for (let n = 0; n < (def.hidden || 0) && spots.length; ) {
+  let hidden = 0;
+  while (hidden < (def.hidden || 0) && spots.length) {
     const [ci, k] = spots.splice(Math.floor(rand() * spots.length), 1)[0];
     const col = columns[ci];
     if (col[k - 1].hidden || (col[k + 1] && col[k + 1].hidden)) continue;
     col[k].hidden = true;
-    n++;
+    hidden++;
   }
   const board = cloneBoard(base);
   board.slots = Array(padsFor(def)).fill(null);
   board.columns = columns;
-  return { def, model, board, shooters: crew.length };
+  revealLone(board);
+  return { def, model, board, shooters: crew.length, hidden };
+}
+
+// A short fingerprint of a level as dealt: its settings, its sculpture, its crew and lines, its
+// pads and the rules' version. A saved attempt carries it (js/main.js), so a save made before
+// any of those changed is turned down instead of replayed onto a different puzzle.
+const prints = new Map();
+export function levelPrint(n) {
+  const L = buildLevel(n);
+  if (!prints.has(L.def)) {
+    const text = JSON.stringify([RULES, FLIGHT, L.def, Array.from(L.model.cells).join(''), L.model.palette,
+      L.board.columns.map(col => col.map(s => [s.color, s.count, s.hidden ? 1 : 0])), L.board.slots.length]);
+    let a = 0x811c9dc5, b = 0x9e3779b9;
+    for (let i = 0; i < text.length; i++) {
+      const c = text.charCodeAt(i);
+      a = Math.imul(a ^ c, 16777619);
+      b = Math.imul(b ^ c, 2246822519) ^ (b >>> 13);
+    }
+    prints.set(L.def, `${(a >>> 0).toString(36)}.${(b >>> 0).toString(36)}.${text.length}`);
+  }
+  return prints.get(L.def);
 }
 
 // The level as played. Built once per level line and kept, so a restart, the arrows and the

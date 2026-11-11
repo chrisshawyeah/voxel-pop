@@ -9,17 +9,20 @@
 // and keeps a deal that the planning player wins (tools/players.mjs) with a line that also wins
 // when the sends overlap in time (lineHolds: sends 0, 150, 300 and 600 ms apart, with the
 // game's landing pause), and whose greedy win rate over 300 plays (the same plays the tests
-// make) lands inside the level's `greedy` band, clear of its edges. When no deal lands in the
-// band it keeps the nearest one the planning player wins and says so. Deals with more than 30
-// crew are skipped. It prints one line per level, with the hasty greedy rate (a greedy player
-// tapping every 150 ms) beside the greedy one, and at the end the level lines to copy into
+// make) lands inside the level's `greedy` band, clear of its edges. From level 9 on, the player
+// who follows the finishes-or-parks mark without undoing must also lose some of the time (it wins
+// at most FORECAST_MAX %), and on a level with `opening: 'park'` most greedy plays (PARK_MIN %)
+// park a crew member in their first three sends. When no deal lands in the band it keeps the nearest one
+// that passes the rest and says so. Deals with more than 30 crew are skipped. It prints one line
+// per level, with the hasty greedy rate (a greedy player tapping every 150 ms) and the mark
+// follower's rate beside the greedy one, and at the end the level lines to copy into
 // js/levels.js; --write writes them there, for one level or all of them.
 import { readFileSync, writeFileSync } from 'node:fs';
 import { spawn } from 'node:child_process';
 import { cpus } from 'node:os';
 import { fileURLToPath } from 'node:url';
 import { LEVELS, dealLevel, rng } from '../js/levels.js';
-import { greedyRate, greedyCheck, hastyCheck, lineHolds, plan } from './players.mjs';
+import { greedyRate, greedyCheck, hastyCheck, forecastCheck, forecastFirst, measure, lineHolds, earlyParks, plan, FORECAST_FROM, FORECAST_MAX, PARK_MIN } from './players.mjs';
 
 const args = process.argv.slice(2);
 const write = args.includes('--write');
@@ -45,8 +48,17 @@ function pick(n) {
   let best = null; // in band, nearest the middle
   let near = null; // out of band, nearest the band
   let big = 0;     // deals skipped for having more than 30 crew
+  const park = def0.opening === 'park';
+  const fcMax = n >= FORECAST_FROM ? FORECAST_MAX : 100;
   const t0 = Date.now();
-  const done = found => ({ n, ...found, hasty: hastyCheck(dealLevel({ ...def0, mix: found.mix, flip: found.flip, deal: found.deal }).board), ms: Date.now() - t0 });
+  const done = found => ({ n, ...found, greedy: def0.greedy, hasty: hastyCheck(dealLevel({ ...def0, mix: found.mix, flip: found.flip, deal: found.deal }).board), ms: Date.now() - t0 });
+  // The mark follower wins at most fcMax % (a quick look first: it is the slowest measure).
+  const fcOk = (board, deal) => {
+    if (fcMax >= 100) return forecastCheck(board).rate;
+    if (measure(forecastFirst, board, 2000 + deal, 30).rate > fcMax + 7) return null;
+    const fc = forecastCheck(board).rate;
+    return fc <= fcMax ? fc : null;
+  };
   for (const { mix, flip } of grid) {
     for (let deal = 0; deal < tries; deal++) {
       const def = { ...def0, mix, flip, deal };
@@ -55,11 +67,17 @@ function pick(n) {
       const quick = greedyRate(L.board, rng(1000 + deal), 60);
       const off = quick < lo ? lo - quick : quick > hi ? quick - hi : 0;
       if (off > 12 && near && off >= near.off) continue; // far outside the band, and something nearer is known
+      if (park && earlyParks(L.board, 40) < PARK_MIN) continue;
       const p = plan(L.board, { budget: 30000, holds: line => lineHolds(L.board, line) });
       if (p.win !== true || !p.holds) continue;
       const rate = greedyCheck(L.board);
       const out = rate < lo ? lo - rate : rate > hi ? rate - hi : 0;
-      const found = { mix, flip, deal, rate, crew: L.shooters, boards: p.boards, off: out };
+      const keep = (!out && (safe(rate) || !best)) || (out && (!near || out < near.off));
+      if (!keep) continue;
+      const fc = fcOk(L.board, deal);
+      if (fc === null) continue;
+      if (park && earlyParks(L.board) < PARK_MIN) continue;
+      const found = { mix, flip, deal, rate, fc, crew: L.shooters, boards: p.boards, off: out };
       if (!out && safe(rate)) return done(found);
       if (!out && !best) best = found;
       if (out && (!near || out < near.off)) near = found;
@@ -67,19 +85,21 @@ function pick(n) {
   }
   if (best || near) return done(best || near);
   const why = big ? `, ${big} deals skipped for more than 30 crew (use bigger crew)` : '';
-  return { n, error: `no deal the planning player wins with a line that holds when sends overlap${why}`, ms: Date.now() - t0 };
+  const what = [park && `most greedy plays park someone in their first three sends`, fcMax < 100 && `the mark follower wins at most ${fcMax}%`].filter(Boolean).join(', ');
+  return { n, error: `no deal the planning player wins with a line that holds when sends overlap${what ? ` (and ${what})` : ''}${why}`, ms: Date.now() - t0 };
 }
 
 const lineOf = (def, p) => {
   const keys = { ...def, mix: p.mix, flip: p.flip, deal: p.deal };
   const v = x => (Array.isArray(x) ? `[${x.join(', ')}]` : typeof x === 'string' ? `'${x}'` : x);
-  return `  { ${['name', 'model', 'cols', 'pads', 'crew', 'hidden', 'mix', 'flip', 'greedy', 'deal'].map(k => `${k}: ${v(keys[k] ?? 0)}`).join(', ')} },`;
+  const names = ['name', 'model', 'cols', 'pads', 'crew', 'hidden', 'mix', 'flip', 'greedy', ...(keys.opening ? ['opening'] : []), 'deal'];
+  return `  { ${names.map(k => `${k}: ${v(keys[k] ?? 0)}`).join(', ')} },`;
 };
 
 const say = (r) => {
   const d = LEVELS[r.n];
   if (r.error) return `L${r.n + 1} ${d.name}: ${r.error}`;
-  return `L${r.n + 1} ${d.name}: deal ${r.deal} mix ${r.mix} flip ${r.flip}  greedy ${r.rate}% (band ${d.greedy.join('-')}%${r.off ? `, MISSED by ${r.off}` : ''})  hasty ${r.hasty}%  ${r.crew} crew  ${(r.ms / 1000).toFixed(1)}s`;
+  return `L${r.n + 1} ${d.name}: deal ${r.deal} mix ${r.mix} flip ${r.flip}  greedy ${r.rate}% (band ${(r.greedy || d.greedy).join('-')}%${r.off ? `, MISSED by ${r.off}` : ''})  hasty ${r.hasty}%  mark follower ${r.fc}%  ${r.crew} crew  ${(r.ms / 1000).toFixed(1)}s`;
 };
 
 // Writes the picked lines into js/levels.js, in place of each level's line.

@@ -12,6 +12,14 @@
 
 export const START_SLOTS = 5; // launch pads, unless the level says otherwise (pads: in levels.js)
 export const FLIGHT = 9;      // ticks from a shot leaving its pad to landing (9 x 1/30 s = 0.3 s)
+// Which version of these rules a saved attempt was played under (js/main.js keeps it with the
+// save). Add one whenever a change here makes the same sends end on a different board, so a level
+// left half-played under the old rules starts again instead of coming back wrong.
+export const RULES = 3;
+// The latest tick a saved attempt may name (about 90 hours of play at 30 ticks a second). Ticks
+// stay whole numbers far below this, so tick + FLIGHT is always exact and every replay ends.
+export const MAX_TICK = 1e7;
+export const MAX_UNDOS = 1e6;
 
 export const coords = (st, i) => [i % st.sx, Math.floor(i / st.sx) % st.sy, Math.floor(i / (st.sx * st.sy))];
 export const index = (st, x, y, z) => x + st.sx * (y + st.sy * z);
@@ -128,7 +136,8 @@ export function freeSlot(st) {
 // takes to land there before its first shot (the game gives the flight to the pad time to
 // finish; the tests and test players send with 0, which changes nothing for a player who waits
 // for the pads to stop: a crew member sent alone fires the same shots a few ticks later).
-// Returns { slot, shooter, revealed } or null when the column is empty or no slot is free.
+// Returns { slot, shooter, revealed, lone } or null when the column is empty or no slot is free;
+// revealed is the "?" that has just become the front of its line, lone the crew revealLone() showed.
 export function deploy(st, col, land = 0) {
   const column = st.columns[col];
   if (!column || !column.length) return null;
@@ -140,7 +149,28 @@ export function deploy(st, col, land = 0) {
   st.slots[slot] = shooter;
   let revealed = null;
   if (column.length && column[0].hidden) { column[0].hidden = false; revealed = column[0]; }
-  return { slot, shooter, revealed };
+  return { slot, shooter, revealed, lone: revealLone(st) };
+}
+
+// A "?" is a guess between the crew still hidden (the line preview lists them). Once every one
+// still hidden is the same crew (one colour, one number), there is nothing left to guess, so they
+// are shown as themselves. Returns the crew it showed. The planning test player keeps its own
+// unknowns (`unknown`, tools/players.mjs) and works the same thing out itself, so it skips them.
+export function revealLone(st) {
+  let kind = null;
+  const lone = [];
+  for (const col of st.columns) {
+    for (const s of col) {
+      if (!s.hidden) continue;
+      if (s.unknown) return [];
+      const k = `${s.color}:${s.count}`;
+      if (kind !== null && k !== kind) return [];
+      kind = k;
+      lone.push(s);
+    }
+  }
+  for (const s of lone) s.hidden = false;
+  return lone;
 }
 
 // st.exposed[c] holds the cubes of colour c that can be hit and that no shot has taken yet.
@@ -164,17 +194,19 @@ export function target(st, c) {
 // is free for the next one while that shot is still flying. A shot in the air remembers when it
 // left, from which pad, in which colour and whose it is, so the screen can draw it from the
 // rules alone (and draw it again after an undo).
-// Returns { slot, shooter, cell, freed } or null when the pad cannot fire.
+// Returns { slot, shooter, cell, freed, flight } or null when the pad cannot fire; flight is that
+// shot's record in st.flying, which the screen draws as it is.
 export function launch(st, slot) {
   if (!canFire(st, slot)) return null;
   const s = st.slots[slot];
   const cell = target(st, s.color);
   st.exposed[s.color].delete(cell);
   s.count--;
-  st.flying.push({ cell, at: st.tick + FLIGHT, from: st.tick, slot, color: s.color, id: s.id });
+  const flight = { cell, at: st.tick + FLIGHT, from: st.tick, slot, color: s.color, id: s.id };
+  st.flying.push(flight);
   const freed = s.count <= 0;
   if (freed) st.slots[slot] = null;
-  return { slot, shooter: s, cell, freed };
+  return { slot, shooter: s, cell, freed, flight };
 }
 
 // A shot lands: its cube goes and the cubes behind it open up.
@@ -247,15 +279,36 @@ export function forecast(st, col, land = 0) {
   }
 }
 
-// A level being played: its board, the sends made so far (line and tick) and a copy of the
-// board from just before each one, so the last send can be taken back, again and again, to
-// the start of the level. replay() rebuilds all of it from the sends alone, which is what the
-// game keeps in the browser's storage.
+// What becomes of each crew member already on a pad if nothing else is sent: the rules run on a
+// copy of the board until nothing moves. A Map from crew id to the shots it is left with when it
+// parks, 0 when it finishes and frees its pad. One run answers every pad, and the answer holds
+// until the next send or undo, since nothing else changes where the board is going. This is how
+// a crew member that a later send has robbed shows it at once, before it runs dry.
+export function fates(st) {
+  const sim = cloneBoard(st);
+  const onPads = sim.slots.filter(Boolean);
+  while (busy(sim)) tickGame(sim);
+  return new Map(onPads.map(s => [s.id, sim.slots.includes(s) ? s.count : 0]));
+}
+
+// A board in four numbers: its clock, how many cubes are gone and which (two hashes). A saved
+// attempt keeps one after each send and one for the moment it was left, so a replay that comes out
+// different (other rules, another sculpture) is caught instead of played.
+export const checkOf = b => [b.tick, b.cleared, b.h1, b.h2];
+const sameCheck = (a, b) => Array.isArray(b) && b.length === 4 && a.every((v, k) => v === b[k]);
+
+// A level being played: its board, the sends made so far (line and tick), a check of the board
+// just after each, and a copy of the board from just before each one, so the last send can be
+// taken back, again and again, to the start of the level. `undos` counts every send taken back in
+// this attempt; undoing never lowers it, and a win with none is a clean clear (js/main.js).
+// restore() rebuilds all of it from save(), which is what the game keeps in the browser's storage.
 export class Attempt {
   constructor(board) {
     this.board = board;
     this.sends = [];
+    this.checks = [];
     this.before = [];
+    this.undos = 0;
   }
 
   get canUndo() { return this.before.length > 0; }
@@ -267,6 +320,7 @@ export class Attempt {
     if (!d) return null;
     this.before.push(copy);
     this.sends.push([col, copy.tick]);
+    this.checks.push(checkOf(this.board));
     return d;
   }
 
@@ -275,18 +329,47 @@ export class Attempt {
     if (!this.before.length) return false;
     this.board = this.before.pop();
     this.sends.pop();
+    this.checks.pop();
+    this.undos++;
     return true;
   }
 
+  // Plain data for storage: the sends with their checks, the undos so far, and the tick the board
+  // is at now with its check, so restore() can bring back the board as it is at this moment.
+  save() {
+    return { sends: this.sends.map(s => s.slice()), checks: this.checks.map(c => c.slice()), undos: this.undos, at: this.board.tick, end: checkOf(this.board) };
+  }
+
   // Plays `sends` on a fresh copy of `start` with the game's own ticks and returns the attempt
-  // as it stood just after the last of them, or null when they do not fit the board.
-  static replay(start, sends, land = 0) {
+  // as it stood just after the last of them, or null when they do not fit the board. With
+  // `checks`, every send must also leave the board its check says, or it is null.
+  static replay(start, sends, land = 0, checks = null) {
+    if (!Array.isArray(sends) || (checks && (!Array.isArray(checks) || checks.length !== sends.length))) return null;
     const a = new Attempt(cloneBoard(start));
-    for (const s of sends) {
-      if (!Array.isArray(s) || !Number.isInteger(s[0]) || !Number.isInteger(s[1]) || s[1] < a.board.tick) return null;
+    for (let k = 0; k < sends.length; k++) {
+      const s = sends[k];
+      if (!Array.isArray(s) || s.length !== 2 || !Number.isSafeInteger(s[0]) || !Number.isSafeInteger(s[1])) return null;
+      if (s[1] < a.board.tick || s[1] > MAX_TICK) return null;
       advance(a.board, s[1]);
-      if (!a.send(s[0], land)) return null;
+      if (!a.send(s[0], land)) return null; // a line that is not there or is empty, or no free pad
+      if (checks && !sameCheck(a.checks[k], checks[k])) return null;
     }
+    return a;
+  }
+
+  // The attempt a save() describes, with the board at the tick it was left at, or null when the
+  // save is broken or does not fit this board: every field is checked, every tick bounded, and
+  // each send's check and the last one must come out the same.
+  static restore(start, save, land = 0) {
+    if (!save || typeof save !== 'object') return null;
+    const { sends, checks, undos, at, end } = save;
+    if (!Number.isSafeInteger(undos) || undos < 0 || undos > MAX_UNDOS) return null;
+    if (!Number.isSafeInteger(at) || at < 0 || at > MAX_TICK) return null;
+    const a = Attempt.replay(start, sends, land, checks || []);
+    if (!a || at < a.board.tick) return null;
+    advance(a.board, at);
+    if (!sameCheck(checkOf(a.board), end)) return null;
+    a.undos = undos;
     return a;
   }
 }
@@ -314,6 +397,7 @@ export function purgeCleared(st) {
     }
     if (col.length && col[0].hidden) col[0].hidden = false;
   });
+  if (gone.length) revealLone(st);
   return gone;
 }
 
