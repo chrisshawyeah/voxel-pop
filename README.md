@@ -2,9 +2,12 @@
 
 A cube-popping puzzle. A sculpture made of coloured cubes turns in the middle. Tap the front
 crew member of a line to send it up to a launch pad, where it pops cubes of its colour until
-its number runs out. A crew member can only hit a cube with nothing on top of it, so the
-sculpture is eaten from the top down; one whose colour is still buried waits on its pad,
-taking room, until the cubes above are gone. Clear every cube to win. If every pad is full and
+its number runs out. A crew member can hit any cube on the outside of the sculpture, from any
+side: a cube with a face on the open air around it (the turntable under the sculpture is not
+air, and nor is air sealed inside a hollow until the hollow is broken into). So the sculpture is
+eaten from the outside in, and the puzzle is in its layers: a colour hidden inside comes out only
+as the cubes covering it go, and a crew member whose colour is still hidden waits on its pad,
+taking room, until then. Clear every cube to win. If every pad is full and
 none of them can hit anything, you are out of room: a tap takes back your last send, and another
 tap the one before, back to the start of the level if need be.
 
@@ -14,7 +17,7 @@ bar. Undos are counted for the attempt (a restart of the level starts the count 
 back a send never lowers the count, and it survives a reload.
 
 The crew show what they can reach. The front of a line is *ready* (a white rim and a glow, eyes
-up) when its colour has a cube with nothing on top that no shot has taken yet, so it pops the
+up) when its colour has a cube on the outside that no shot has taken yet, so it pops the
 moment it is up; otherwise it is *covered* and looks plain. On a pad, a crew member with nothing
 to hit is *asleep* (dim, eyes shut, a "zz") and its pad turns dashed: it is waiting, not broken.
 All of it comes from the same test the rules use (`st.exposed` in `js/logic.js`) and switches
@@ -49,7 +52,7 @@ hidden are all the same crew, there is nothing left to guess and they are shown 
 
 The lessons, one line at a time: "Tap the front crew" on levels 1 to 3 until the first send; on
 level 1, just after it, what the tick means, for 2.5 seconds; on any level, the first time a crew
-member sleeps on a pad, "Sleeping crew keep a pad. Clear the cubes above their colour." until that
+member sleeps on a pad, "Sleeping crew keep a pad. Clear the cubes covering their colour." until that
 crew member wakes (and at least 2.5 seconds); and from level 4 the line about holding a front,
 until the first hold. Only time on screen counts toward the 2.5 seconds: not while the line is
 hidden (out of room, a win, a message over it, the page in the background). The browser
@@ -163,13 +166,18 @@ points easier for the follower than the level before it, except a level whose ba
 above the one before (the breather); the median undos stay at most 3 up to level 12 and at most 6
 after, and from one level to the next rise by at most 3 and fall by at most 1 (the breather left
 out). The median jumps from 0 to a level's full depth once the follower wins less than half the
-time, which is why the first hard level may rise by 3.
+time, which is why one level may rise by 3 at once (the tree, level 14, at 3; then 4 and 5).
 `curveMisses()` in `tools/players.mjs` checks it all; the tests and the deal picker both use it.
 
-Levels 2 and 3 open on purpose with parking and unlocking: the duck has bath foam over its back
-(the yellow under it waits), the penguin a red scarf (the head above and the body below wait on
-it), each with four pads and ten crew. Level 17, the melon, is a small breather between the
-dolls and the castle.
+Since a crew member can hit its colour from any side, a colour all on the outside never makes
+anyone wait; the waiting comes from colours hidden inside. So every sculpture past level 1 has
+inner layers (`bands()` in `js/models.js`): under its skin, more colours by depth, a new colour
+for each layer, which look the same from outside. Levels 2 and 3 open on purpose with parking and
+unlocking: the duck has foam over its back and more foam, an orange squeaker and a black weight
+under a layer of pink rubber; the penguin has its orange fish, more red and more white under a
+layer of blue ice. A crew member of those colours pops what shows and then waits on its pad for
+the rest, each level with three pads. Level 17, the melon, is a small breather between the dolls
+and the castle.
 
 After changing a level's settings, pick a deal for them, then check every level:
 
@@ -186,7 +194,8 @@ beside it again if `npm test` says the curve breaks there.
 editing the file, and `node tools/pick-deals.mjs 12 --list` prints every deal it finds with its
 measures instead of stopping at the first, then how many it listed (it picks none). Deals with
 more than 30 crew are skipped. `node tools/difficulty.mjs` prints every
-level's size, crew, pads, "?" on screen, whether the planning player wins with a line that holds,
+level's size, crew, pads, "?" on screen, how many colours are wholly and partly hidden inside at
+the start (`hid`, as wholly+partly), whether the planning player wins with a line that holds,
 the greedy rate against its band, the hasty greedy, forecast follower (waiting, against `follow`,
 and hasty) and undoing forecast follower rates, the follower's median undos (against `undos`) and
 sends, how long the winning line fires, and at the end every place the curve breaks
@@ -196,7 +205,8 @@ A push to `main` runs the checks and puts the game live at the link above.
 
 ## Ideas to try
 
-- Colours in flat layers make crew wait; upright stripes do not, since a crew member digs straight
-  down its own colour (the fish had upright stripes and nobody ever waited, so it has flat bands now).
+- Colours inside make crew wait; colours on the outside do not, since a crew member hits its
+  colour from any side. A colour that shows a little outside and hides most of itself inside is
+  the trap: it looks ready, and its crew member parks.
 - Crew that are linked and must go up together, or three of a colour that merge into one big one.
 - Big cubes that need several hits.

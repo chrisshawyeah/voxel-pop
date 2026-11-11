@@ -371,12 +371,12 @@ function announce(text) {
 }
 
 // ---------- what each crew member can reach, and what sending it would do ----------
-// A colour can be hit when one of its cubes has nothing on top and no shot has taken it yet:
-// R's st.exposed, the same test the rules fire by. A front of a line is ready (a white rim and a
-// glow) when its colour can be hit, otherwise covered (plain). Both switch the moment that test
-// changes (only the glow fades, css/game.css). A crew member on a pad is awake while it has
-// something to hit or a shot of its own in the air; otherwise it is asleep and its pad shows it
-// is waiting.
+// A colour can be hit when one of its cubes is on the outside of the sculpture (a face on the open
+// air, from any side) and no shot has taken it yet: R's st.exposed, the same test the rules fire
+// by. A front of a line is ready (a white rim and a glow) when its colour can be hit, otherwise
+// covered (plain). Both switch the moment that test changes (only the glow fades, css/game.css).
+// A crew member on a pad is awake while it has something to hit or a shot of its own in the air;
+// otherwise it is asleep and its pad shows it is waiting.
 //
 // What sending a front now would do (R.forecast, the rules run on a copy of the board, if no more
 // crew are sent after it): it finishes and frees its pad, or it parks with N still to fire; and it
@@ -431,7 +431,7 @@ function labelFronts(now = false) {
     if (!el || !s) return;
     const ready = st.exposed[s.color].size > 0;
     const f = forecastFor(ci);
-    el.parentNode.setAttribute('aria-label', `Send ${crewName(s)}, ${ready ? 'ready' : 'covered, its colour is under other cubes'}, ${fcWords(f)}`);
+    el.parentNode.setAttribute('aria-label', `Send ${crewName(s)}, ${ready ? 'ready' : 'covered, other cubes hide its colour'}, ${fcWords(f)}`);
   });
 }
 
@@ -558,7 +558,7 @@ function frontEvents(slot, ci) {
 const SENT = 1, PARK = 2, TICK_SEEN = 4, HOLD = 8;
 const HINT_SEND = 'Tap the front crew';
 const HINT_TICK = `${TICK} it finishes and frees its pad, ${IF_NONE}`;
-const HINT_PARK = 'Sleeping crew keep a pad. Clear the cubes above their colour.';
+const HINT_PARK = 'Sleeping crew keep a pad. Clear the cubes covering their colour.';
 const HINT_HOLD = 'Hold a front crew to preview. Tap to send.';
 const LESSON_MS = 2500;
 let taught = Number(store.get(TAUGHT_KEY)) || 0;

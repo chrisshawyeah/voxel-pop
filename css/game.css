@@ -113,7 +113,7 @@ button:focus-visible { outline: 3px solid var(--ink); outline-offset: 2px; }
   box-shadow: inset 0 3px 8px rgba(31, 37, 71, 0.16);
   display: grid; place-items: end center;
 }
-/* a crew member is parked here, waiting for the cubes above its colour to go */
+/* a crew member is parked here, waiting for the cubes covering its colour to go */
 .pad.waiting { border-style: dashed; border-color: rgba(74, 80, 120, 0.45); background: rgba(255, 255, 255, 0.35); }
 .pad.stuck { animation: stuck 0.9s ease-in-out infinite; }
 @keyframes stuck { 50% { box-shadow: inset 0 3px 8px rgba(31, 37, 71, 0.16), 0 0 0 3px #ff4b5c; } }
@@ -153,7 +153,7 @@ button:focus-visible { outline: 3px solid var(--ink); outline-offset: 2px; }
 .crew.egg .eyes { display: none; }
 .crew.egg .n { bottom: 12px; font-size: 26px; }
 
-/* Ready: its colour has a cube with nothing on top, so it pops the moment it is up (a white rim
+/* Ready: its colour has a cube on the outside, so it pops the moment it is up (a white rim
    and a glow, eyes up). A front of a line that is not ready is covered: it looks plain. Asleep is
    for crew on a pad only: nothing of its colour can be hit, so it waits there (dim, eyes shut,
    "zz"). js/main.js sets these from the same test the rules use. */

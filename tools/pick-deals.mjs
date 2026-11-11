@@ -70,6 +70,7 @@ function pick(n) {
   let best = null; // passes everything; kept while the greedy rate is near an edge of its band
   let near = null; // misses something, by the least so far
   let big = 0;     // deals skipped for having more than 30 crew
+  let easy = 0;    // deals skipped because rushing never loses (the hasty greedy player wins them all)
   let listed = 0;  // deals printed by --list
   const park = def0.opening === 'park';
   const t0 = Date.now();
@@ -91,7 +92,7 @@ function pick(n) {
       if (park && earlyParks(L.board) < PARK_MIN) continue;
       const rate = greedyCheck(L.board);
       const hasty = hastyCheck(L.board);
-      if (hasty > rate + 10 || (n >= 1 && hasty >= 100)) continue;
+      if (hasty > rate + 10 || (n >= 1 && hasty >= 100)) { easy += hasty >= 100; continue; }
       const fc = forecastCheck(L.board).rate;
       const miss = { greedy: off(rate, def0.greedy), fc: off(fc, def0.follow) };
       if (near && !list && miss.greedy + miss.fc >= near.miss) continue; // the slowest measure only for a real contender
@@ -112,7 +113,7 @@ function pick(n) {
   }
   if (listed) return done({ listed }); // --list: the deals are printed above, none is picked
   if (best || near) return done(best || near);
-  const why = big ? `, ${big} deals skipped for more than 30 crew (use bigger crew)` : '';
+  const why = (big ? `, ${big} deals skipped for more than 30 crew (use bigger crew)` : '') + (easy ? `, ${easy} skipped as too easy (rushing always won)` : '');
   return { n, error: `no deal the planning player wins with a line that holds when sends overlap${park ? ' (and that opens with a parked crew member)' : ''}${why}`, ms: Date.now() - t0 };
 }
 

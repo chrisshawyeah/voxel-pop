@@ -17,7 +17,7 @@
 //   only through the forecast on each front (js/logic.js forecast()).
 // forecastFirst, hastyForecast and backtrack (further down) play by that forecast, the way a
 // player who reads it does: they measure how much of a level the forecast plays for you.
-import { cloneBoard, deploy, settle, isWon, freeSlot, tickGame, isJammed, busy, forecast, fates, pace } from '../js/logic.js';
+import { cloneBoard, deploy, settle, isWon, freeSlot, tickGame, isJammed, busy, forecast, fates, pace, removeCube } from '../js/logic.js';
 import { rng } from '../js/levels.js';
 
 // The game's landing pause (LAND in js/main.js) in ticks, and the gaps a quick player leaves
@@ -279,6 +279,22 @@ export function earlyParks(board, plays = 100) {
     }
   }
   return Math.round((100 * parked) / plays);
+}
+
+// The layers of a sculpture: how many of its colours are hidden at the start, fully (not one cube
+// of it can be hit until cubes of another colour go) and partly (a crew of that colour, eating
+// only its own colour as far as it reaches, leaves some of it that waits on another colour).
+// A sculpture with neither is no puzzle under the outside rule: every crew could finish at once.
+export function hiddenColours(board) {
+  let full = 0, part = 0;
+  board.remaining.forEach((total, c) => {
+    if (!total) return;
+    const sim = cloneBoard(board);
+    let alone = 0;
+    while (sim.exposed[c].size) for (const i of [...sim.exposed[c]]) { removeCube(sim, i); alone++; }
+    if (!alone) full++; else if (alone < total) part++;
+  });
+  return { full, part };
 }
 
 const median = xs => { if (!xs.length) return null; const s = xs.slice().sort((a, b) => a - b); return s[Math.floor((s.length - 1) / 2)]; };

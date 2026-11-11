@@ -1,11 +1,16 @@
 // The rules of the game, with no DOM and no three.js, so the tests run them in Node.
 // A board is a voxel grid of colour indices (0 = empty, c+1 = colour c), y pointing up.
-// A cube can be hit only while nothing sits on top of it: the crew eat the sculpture from the
-// top down, and taking the top cube of a stack opens the one under it.
+// A cube can be hit, from any side, while at least one of its six faces touches the outside air:
+// the empty space joined to the space around the sculpture (above it and beside it; it stands on
+// a turntable, so a face resting on that is not on the outside). Air sealed inside a hollow does
+// not count until a cube between it and the outside goes. So the crew eat the sculpture from the
+// outside in, and a colour hidden inside waits until the cubes covering it are gone: taking a
+// cube lets the air into the gap it leaves, which opens the cubes beside it (and any hollow it
+// breaks into).
 //
 // Time runs in ticks. In one tick every pad that can fire sends one shot. A shot picks its cube
 // when it leaves (that cube is then taken: no second shot aims at it) and the cube is removed,
-// opening the one under it, only when the shot lands, FLIGHT ticks later. The game runs one
+// opening the cubes beside it, only when the shot lands, FLIGHT ticks later. The game runs one
 // tick every 1/30 s, or FAST times as often while there is nothing to send
 // (pace() below); the test players run the same ticks back to back, so a player who waits for
 // the pads to stop sees exactly the board the checks saw, and the timed ones keep the game's
@@ -17,7 +22,7 @@ export const FAST = 3;        // how much faster the ticks run while there is no
 // Which version of these rules a saved attempt was played under (js/main.js keeps it with the
 // save). Add one whenever a change here makes the same sends end on a different board, so a level
 // left half-played under the old rules starts again instead of coming back wrong.
-export const RULES = 3;
+export const RULES = 4;
 // The latest tick a saved attempt may name (about 90 hours of play at 30 ticks a second). Ticks
 // stay whole numbers far below this, so tick + FLIGHT is always exact and every replay ends.
 export const MAX_TICK = 1e7;
@@ -26,19 +31,12 @@ export const MAX_UNDOS = 1e6;
 export const coords = (st, i) => [i % st.sx, Math.floor(i / st.sx) % st.sy, Math.floor(i / (st.sx * st.sy))];
 export const index = (st, x, y, z) => x + st.sx * (y + st.sy * z);
 
-// The stack a cell sits in (one per x, z) and the highest filled height in it below `from`.
-const stackOf = (st, i) => (i % st.sx) + st.sx * Math.floor(i / (st.sx * st.sy));
-function below(st, stack, from) {
-  const x = stack % st.sx, z = Math.floor(stack / st.sx);
-  for (let y = from; y >= 0; y--) if (st.cells[index(st, x, y, z)]) return y;
-  return -1;
-}
-
 // The one targeting rule, used by the game, the checks and the test players alike: of the cubes
-// a crew member can hit, it takes the highest one first, and on the same layer the one farthest
-// from the middle (it peels the sculpture from the top and the outside in). It never depends on
-// the camera, so the same taps give the same board every time. order[i] is cell i's place in
-// that rule (lower goes first); it depends only on the grid's size, so boards share it.
+// a crew member can hit (any it can see from outside), it takes the highest one first, and on
+// the same layer the one farthest from the middle, so each crew peels its colour from the top
+// down and from the outside in. It never depends on the camera, so the same taps give the same
+// board every time. order[i] is cell i's place in that rule (lower goes first); it depends only
+// on the grid's size, so boards share it.
 const orderCache = new Map();
 function targetOrder(sx, sy, sz) {
   const key = `${sx}x${sy}x${sz}`;
@@ -68,6 +66,11 @@ function zobrist(n) {
   return z;
 }
 
+// st.out[i] is 1 when cell i is on the outside: an empty cell that is outside air (joined to the
+// space around the grid), or a cube with a face on that air (it can be hit, or a shot has taken
+// it). It only ever turns from 0 to 1, so a board carries it as one byte per cell, and a cube that
+// goes leaves a gap with the same mark: outside air when the cube could be hit, part of a sealed
+// hollow when it could not (only a board changed by hand removes such a cube).
 export function makeBoard(model) {
   const { sx, sy, sz, palette } = model;
   const cells = Uint8Array.from(model.cells);
@@ -75,7 +78,7 @@ export function makeBoard(model) {
   const st = {
     sx, sy, sz, cells, palette,
     order: targetOrder(sx, sy, sz), zob: zobrist(cells.length), h1: 0, h2: 0,
-    top: new Int16Array(sx * sz).fill(-1), // height of the top cube of each stack, -1 when empty
+    out: new Uint8Array(cells.length),
     remaining: new Int32Array(n),
     exposed: Array.from({ length: n }, () => new Set()),
     total: 0, cleared: 0,
@@ -85,11 +88,15 @@ export function makeBoard(model) {
   for (let i = 0; i < cells.length; i++) {
     if (cells[i]) { st.remaining[cells[i] - 1]++; st.total++; }
   }
-  for (let stack = 0; stack < sx * sz; stack++) {
-    const y = below(st, stack, sy - 1);
-    st.top[stack] = y;
-    if (y >= 0) { const i = index(st, stack % sx, y, Math.floor(stack / sx)); st.exposed[cells[i] - 1].add(i); }
+  // Every cell on a side or the top of the grid touches the space around it; the air spreads in
+  // from there. The bottom layer stands on the turntable, so nothing is hit from below.
+  const air = [];
+  for (let i = 0; i < cells.length; i++) {
+    const x = i % sx, y = Math.floor(i / sx) % sy, z = Math.floor(i / (sx * sy));
+    if (x && z && x < sx - 1 && z < sz - 1 && y < sy - 1) continue;
+    if (reach(st, i)) air.push(i);
   }
+  for (const i of air) letAirIn(st, i);
   return st;
 }
 
@@ -97,7 +104,7 @@ export function cloneBoard(st) {
   return {
     ...st,
     cells: Uint8Array.from(st.cells),
-    top: Int16Array.from(st.top),
+    out: Uint8Array.from(st.out),
     remaining: Int32Array.from(st.remaining),
     exposed: st.exposed.map(s => new Set(s)),
     flying: st.flying.slice(),
@@ -106,10 +113,38 @@ export function cloneBoard(st) {
   };
 }
 
-// True while nothing sits on top of cube i (a cube a shot has already taken counts too).
-export const isExposed = (st, i) => st.cells[i] > 0 && st.top[stackOf(st, i)] === Math.floor(i / st.sx) % st.sy;
+// The outside air reaches cell i: a cube there can now be hit; an empty cell becomes air.
+// True when it was an empty cell not yet reached (the air goes on through it).
+function reach(st, i) {
+  if (st.out[i]) return false;
+  st.out[i] = 1;
+  const c = st.cells[i];
+  if (c) { st.exposed[c - 1].add(i); return false; }
+  return true;
+}
 
-// Removes one cube and opens the one under it. Returns its colour.
+// Cell i has just become outside air: it opens the cubes beside it, and the air runs on into any
+// sealed hollow it joins, opening that hollow's walls too.
+const todo = [];
+function letAirIn(st, i) {
+  const { sx, sy, sz } = st, layer = sx * sy;
+  todo.push(i);
+  while (todo.length) {
+    const j = todo.pop();
+    const x = j % sx, y = Math.floor(j / sx) % sy, z = Math.floor(j / layer);
+    if (x > 0 && reach(st, j - 1)) todo.push(j - 1);
+    if (x < sx - 1 && reach(st, j + 1)) todo.push(j + 1);
+    if (y > 0 && reach(st, j - sx)) todo.push(j - sx);
+    if (y < sy - 1 && reach(st, j + sx)) todo.push(j + sx);
+    if (z > 0 && reach(st, j - layer)) todo.push(j - layer);
+    if (z < sz - 1 && reach(st, j + layer)) todo.push(j + layer);
+  }
+}
+
+// True while cube i has a face on the outside air (a cube a shot has already taken counts too).
+export const isExposed = (st, i) => st.cells[i] > 0 && st.out[i] === 1;
+
+// Removes one cube and lets the air into the gap, opening the cubes beside it. Returns its colour.
 export function removeCube(st, i) {
   const c = st.cells[i] - 1;
   if (c < 0) return -1;
@@ -118,12 +153,7 @@ export function removeCube(st, i) {
   st.remaining[c]--;
   st.cleared++;
   st.h1 ^= st.zob[0][i]; st.h2 ^= st.zob[1][i];
-  const stack = stackOf(st, i), y = Math.floor(i / st.sx) % st.sy;
-  if (st.top[stack] === y) {
-    const next = below(st, stack, y - 1);
-    st.top[stack] = next;
-    if (next >= 0) { const j = index(st, stack % st.sx, next, Math.floor(stack / st.sx)); st.exposed[st.cells[j] - 1].add(j); }
-  }
+  if (st.out[i]) letAirIn(st, i);
   return c;
 }
 

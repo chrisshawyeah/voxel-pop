@@ -12,10 +12,10 @@ import { makeBoard, cloneBoard, removeCube, revealLone, START_SLOTS, RULES, FLIG
 //   crew    [smallest, largest] number one crew member carries. Each colour is split into crew
 //           of round sizes (steps of ten) in that range; the last of a colour takes what is left,
 //           so the numbers add up to the cubes exactly. Bigger crew means fewer sends, and more
-//           crew left waiting on a pad while their colour is still buried.
+//           crew left waiting on a pad while their colour is still hidden inside.
 //   hidden  how many crew wait as a "?" until they reach the front (never two in a row in a line)
 //   mix     how shuffled the lines are, 0 to 1. 0 deals crew in the order their cubes open up
-//           (top first), 1 deals them at random.
+//           (outside first), 1 deals them at random.
 //   flip    how far crew whose cubes sit deep are pulled to the front of the lines, 0 to 1.
 //           0 keeps them at the back, 0.5 ignores depth, 1 puts the deepest first. Higher is harder.
 //   greedy  [lowest, highest] share of plays, in %, that a player who sends any crew that can
@@ -37,25 +37,25 @@ import { makeBoard, cloneBoard, removeCube, revealLone, START_SLOTS, RULES, FLIG
 //           land where the line says.
 export const LEVELS = [
   { name: 'Toadstool', model: 'mushroom', cols: 3, pads: 5, crew: [40, 60], hidden: 0, mix: 0, flip: 0, greedy: [95, 100], follow: [95, 100], undos: 0, deal: 0 },
-  { name: 'Bath Duck', model: 'duck', cols: 4, pads: 4, crew: [50, 80], hidden: 0, mix: 0, flip: 0.5, greedy: [85, 95], follow: [95, 100], undos: 0, opening: 'park', deal: 15 },
-  { name: 'Penguin', model: 'penguin', cols: 4, pads: 4, crew: [60, 90], hidden: 0, mix: 0, flip: 0.4, greedy: [85, 95], follow: [95, 100], undos: 0, opening: 'park', deal: 7 },
-  { name: 'Hot-Air Balloon', model: 'balloon', cols: 4, pads: 5, crew: [40, 70], hidden: 0, mix: 0.1, flip: 0.8, greedy: [70, 90], follow: [80, 90], undos: 1, deal: 18 },
-  { name: 'Robot', model: 'robot', cols: 5, pads: 5, crew: [50, 70], hidden: 0, mix: 0, flip: 0, greedy: [70, 90], follow: [79, 89], undos: 1, deal: 2 },
-  { name: 'Fish', model: 'fish', cols: 4, pads: 5, crew: [30, 50], hidden: 1, mix: 0.3, flip: 0.2, greedy: [70, 90], follow: [78, 88], undos: 1, deal: 35 },
-  { name: 'Cactus', model: 'cactus', cols: 4, pads: 5, crew: [40, 60], hidden: 1, mix: 0, flip: 0, greedy: [70, 90], follow: [76, 86], undos: 1, deal: 1 },
-  { name: 'Burger', model: 'burger', cols: 4, pads: 5, crew: [50, 80], hidden: 1, mix: 0.2, flip: 0, greedy: [70, 90], follow: [75, 85], undos: 1, deal: 17 },
-  { name: 'Lighthouse', model: 'lighthouse', cols: 5, pads: 5, crew: [50, 70], hidden: 1, mix: 0.45, flip: 0, greedy: [40, 70], follow: [58, 70], undos: 3, deal: 24 },
-  { name: 'Gift Box', model: 'gift', cols: 5, pads: 5, crew: [40, 70], hidden: 2, mix: 0.3, flip: 0.4, greedy: [40, 70], follow: [55, 68], undos: 3, deal: 5 },
-  { name: 'Rocket', model: 'rocket', cols: 5, pads: 5, crew: [30, 50], hidden: 2, mix: 0.2, flip: 0.4, greedy: [40, 70], follow: [52, 65], undos: 3, deal: 17 },
-  { name: 'Snowman', model: 'snowman', cols: 5, pads: 5, crew: [50, 80], hidden: 2, mix: 0.2, flip: 0.6, greedy: [40, 70], follow: [50, 62], undos: 3, deal: 16 },
-  { name: 'Cupcake', model: 'cupcake', cols: 5, pads: 5, crew: [40, 60], hidden: 2, mix: 0.3, flip: 0.4, greedy: [40, 70], follow: [47, 58], undos: 4, deal: 26 },
-  { name: 'Tree', model: 'tree', cols: 5, pads: 4, crew: [40, 60], hidden: 2, mix: 0.2, flip: 0, greedy: [40, 70], follow: [45, 55], undos: 4, deal: 27 },
-  { name: 'House', model: 'house', cols: 4, pads: 4, crew: [50, 80], hidden: 2, mix: 0.6, flip: 0, greedy: [15, 45], follow: [36, 45], undos: 5, deal: 10 },
-  { name: 'Nesting Dolls', model: 'dolls', cols: 5, pads: 5, crew: [60, 100], hidden: 2, mix: 0, flip: 0.5, greedy: [15, 45], follow: [33, 45], undos: 5, deal: 3 },
-  { name: 'Melon', model: 'melon', cols: 3, pads: 5, crew: [30, 50], hidden: 1, mix: 0.1, flip: 0.5, greedy: [70, 85], follow: [60, 80], undos: 2, deal: 0 },
-  { name: 'Castle', model: 'castle', cols: 5, pads: 4, crew: [60, 100], hidden: 3, mix: 0.2, flip: 0.4, greedy: [15, 45], follow: [30, 42], undos: 6, deal: 8 },
-  { name: 'Patchwork', model: 'patchwork', cols: 5, pads: 3, crew: [40, 60], hidden: 2, mix: 0.1, flip: 0.6, greedy: [15, 45], follow: [27, 40], undos: 6, deal: 4 },
-  { name: 'Ringed Planet', model: 'planet', cols: 4, pads: 3, crew: [60, 100], hidden: 3, mix: 0.3, flip: 0.8, greedy: [15, 45], follow: [25, 38], undos: 6, deal: 8 },
+  { name: 'Bath Duck', model: 'duck', cols: 4, pads: 3, crew: [50, 80], hidden: 0, mix: 0.1, flip: 0.5, greedy: [85, 95], follow: [95, 100], undos: 0, opening: 'park', deal: 12 },
+  { name: 'Penguin', model: 'penguin', cols: 3, pads: 3, crew: [60, 90], hidden: 0, mix: 0, flip: 0.4, greedy: [85, 95], follow: [95, 100], undos: 0, opening: 'park', deal: 11 },
+  { name: 'Hot-Air Balloon', model: 'balloon', cols: 4, pads: 5, crew: [50, 80], hidden: 0, mix: 0.2, flip: 0.6, greedy: [70, 90], follow: [80, 90], undos: 1, deal: 5 },
+  { name: 'Robot', model: 'robot', cols: 5, pads: 5, crew: [50, 70], hidden: 0, mix: 0, flip: 0.6, greedy: [70, 90], follow: [79, 89], undos: 1, deal: 11 },
+  { name: 'Fish', model: 'fish', cols: 4, pads: 4, crew: [20, 40], hidden: 1, mix: 0.3, flip: 0.6, greedy: [70, 90], follow: [78, 88], undos: 1, deal: 23 },
+  { name: 'Cactus', model: 'cactus', cols: 4, pads: 4, crew: [30, 50], hidden: 1, mix: 0.1, flip: 0.6, greedy: [70, 90], follow: [76, 86], undos: 1, deal: 6 },
+  { name: 'Burger', model: 'burger', cols: 4, pads: 5, crew: [50, 80], hidden: 1, mix: 0.2, flip: 0.5, greedy: [70, 90], follow: [75, 85], undos: 1, deal: 32 },
+  { name: 'Lighthouse', model: 'lighthouse', cols: 5, pads: 4, crew: [50, 70], hidden: 1, mix: 0.1, flip: 0.6, greedy: [40, 70], follow: [58, 70], undos: 3, deal: 22 },
+  { name: 'Gift Box', model: 'gift', cols: 5, pads: 4, crew: [40, 70], hidden: 2, mix: 0.1, flip: 0.6, greedy: [40, 70], follow: [55, 68], undos: 3, deal: 12 },
+  { name: 'Rocket', model: 'rocket', cols: 5, pads: 4, crew: [30, 50], hidden: 2, mix: 0, flip: 0.6, greedy: [40, 70], follow: [52, 65], undos: 3, deal: 1 },
+  { name: 'Snowman', model: 'snowman', cols: 5, pads: 4, crew: [50, 80], hidden: 2, mix: 0.1, flip: 0.6, greedy: [40, 70], follow: [50, 62], undos: 3, deal: 0 },
+  { name: 'Cupcake', model: 'cupcake', cols: 5, pads: 3, crew: [40, 60], hidden: 2, mix: 0.2, flip: 0.6, greedy: [40, 70], follow: [47, 58], undos: 4, deal: 22 },
+  { name: 'Tree', model: 'tree', cols: 3, pads: 3, crew: [30, 50], hidden: 2, mix: 0.1, flip: 0.8, greedy: [40, 70], follow: [45, 55], undos: 4, deal: 90 },
+  { name: 'House', model: 'house', cols: 3, pads: 4, crew: [50, 80], hidden: 2, mix: 0.3, flip: 0.8, greedy: [15, 45], follow: [36, 45], undos: 5, deal: 20 },
+  { name: 'Nesting Dolls', model: 'dolls', cols: 4, pads: 5, crew: [50, 80], hidden: 2, mix: 0.1, flip: 0.8, greedy: [15, 45], follow: [33, 45], undos: 5, deal: 14 },
+  { name: 'Melon', model: 'melon', cols: 3, pads: 5, crew: [30, 50], hidden: 1, mix: 0.2, flip: 0.8, greedy: [70, 85], follow: [60, 80], undos: 2, deal: 1 },
+  { name: 'Castle', model: 'castle', cols: 4, pads: 3, crew: [60, 100], hidden: 3, mix: 0, flip: 0.6, greedy: [15, 45], follow: [30, 42], undos: 6, deal: 1 },
+  { name: 'Patchwork', model: 'patchwork', cols: 4, pads: 3, crew: [30, 50], hidden: 2, mix: 0.1, flip: 0.6, greedy: [15, 45], follow: [27, 40], undos: 6, deal: 5 },
+  { name: 'Ringed Planet', model: 'planet', cols: 4, pads: 3, crew: [60, 100], hidden: 3, mix: 0.3, flip: 0.8, greedy: [15, 45], follow: [25, 38], undos: 6, deal: 24 },
 ];
 
 export const padsFor = def => def.pads || START_SLOTS;
