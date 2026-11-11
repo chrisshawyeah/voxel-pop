@@ -234,6 +234,23 @@ export const journeys = [
           const words = /^(no free pad|(finishes|parks \d+)(; strands \w+ \d+)*with no more sends)$/;
           if (!words.test(tip.text)) throw new Error(`hovering a front shows "${tip.text}"`);
           if (!/(finishes|parks \d+)(; strands \w+ \d+)*, with no more sends|no free pad/.test(tip.label)) throw new Error(`the front's name does not say what sending it would do: "${tip.label}"`);
+          // The longest forecast the levels can give (level 12 strands four crew, 78 characters) must
+          // wrap and stay inside the window, placed the way the game places it.
+          const fit = await ctx.page.evaluate(() => {
+            const t = document.querySelector("#queues .front .tip:not([hidden])") as HTMLElement;
+            const b = t.querySelector("b") as HTMLElement;
+            const html = b.innerHTML, was = t.style.marginLeft;
+            b.textContent = "parks 19; strands white 1; strands white 12; strands white 17; strands white 2";
+            t.style.marginLeft = "0px";
+            let r = t.getBoundingClientRect();
+            t.style.marginLeft = `${Math.max(0, 6 - r.left) - Math.max(0, r.right - (innerWidth - 6))}px`;
+            r = t.getBoundingClientRect();
+            const out = { left: Math.round(r.left), right: Math.round(r.right), top: Math.round(r.top), wide: innerWidth };
+            b.innerHTML = html;
+            t.style.marginLeft = was;
+            return out;
+          });
+          if (fit.left < 0 || fit.right > fit.wide || fit.top < 0) throw new Error(`a long forecast leaves the window: ${JSON.stringify(fit)}`);
           await ctx.page.mouse.move(5, 5);
           await ctx.page.waitForTimeout(200);
           const after = await ctx.page.evaluate(() => ({
