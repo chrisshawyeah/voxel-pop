@@ -135,7 +135,7 @@ export const journeys = [
               const open = st.exposed[c[0].color].size > 0;
               const mark = el?.querySelector(".fc") as HTMLElement | null;
               const label = el?.parentElement?.getAttribute("aria-label") || "";
-              const ok = el && el.classList.contains(open ? "ready" : "covered") && mark && !mark.hidden && /alone/.test(label);
+              const ok = el && el.classList.contains(open ? "ready" : "covered") && mark && !mark.hidden && /if no more crew are sent/.test(label);
               return ok ? [] : [i + 1];
             });
           });
@@ -216,24 +216,35 @@ export const journeys = [
       { goto: "/voxel-pop/?level=3", caption: "Level 3" },
       { click: "#next", caption: "Next level" },
       { expect: "Level 4", caption: "Level 4" },
+      { expect: "Hold a front crew to preview. Tap to send.", caption: "Level 4 teaches the preview" },
       {
-        caption: "From level 4 the forecast waits to be asked",
+        caption: "Every front shows its forecast until the first preview, then only when asked",
         run: async (ctx: any) => {
-          const shown = await ctx.page.evaluate(() => Array.from(document.querySelectorAll("#queues .front .fc")).filter(e => !(e as HTMLElement).hidden).length);
-          if (shown) throw new Error(`${shown} fronts show the finishes-or-parks mark on level 4`);
+          const marks = () => ctx.page.evaluate(() => Array.from(document.querySelectorAll("#queues .front .fc")).filter(e => !(e as HTMLElement).hidden).length);
+          const fronts = await ctx.page.evaluate(() => document.querySelectorAll("#queues .col button.front").length);
+          const before = await marks();
+          if (before !== fronts) throw new Error(`${before} of ${fronts} fronts show their forecast before the first preview`);
           const front = ctx.page.locator("#queues .col button.front").first();
           await front.hover({ timeout: 5000 });
-          await ctx.page.waitForTimeout(200);
+          await ctx.page.waitForTimeout(600); // a preview counts once it has been up 300 ms
           const tip = await ctx.page.evaluate(() => {
             const t = document.querySelector("#queues .front .tip:not([hidden])") as HTMLElement | null;
             return { text: t?.textContent || "", label: document.querySelector("#queues .col button.front")?.getAttribute("aria-label") || "" };
           });
-          if (!/finishes alone|parks \d+ alone|no free pad/.test(tip.text)) throw new Error(`hovering a front shows "${tip.text}"`);
-          if (!/finishes alone|parks \d+ alone|no free pad/.test(tip.label)) throw new Error(`the front's name does not say what sending it would do: "${tip.label}"`);
+          const words = /^(no free pad|(finishes|parks \d+)(; strands \w+ \d+)*if no more crew are sent)$/;
+          if (!words.test(tip.text)) throw new Error(`hovering a front shows "${tip.text}"`);
+          if (!/(finishes|parks \d+)(; strands \w+ \d+)*, if no more crew are sent|no free pad/.test(tip.label)) throw new Error(`the front's name does not say what sending it would do: "${tip.label}"`);
           await ctx.page.mouse.move(5, 5);
           await ctx.page.waitForTimeout(200);
-          const left = await ctx.page.evaluate(() => document.querySelectorAll("#queues .front .tip:not([hidden])").length);
-          if (left) throw new Error("the forecast stayed after the mouse left");
+          const after = await ctx.page.evaluate(() => ({
+            tips: document.querySelectorAll("#queues .front .tip:not([hidden])").length,
+            hint: !document.getElementById("hint")!.hidden,
+            taught: (Number(localStorage.getItem("crumble-crew.taught")) & 8) > 0,
+          }));
+          if (after.tips) throw new Error("the forecast stayed after the mouse left");
+          if (await marks()) throw new Error(`after the first preview ${await marks()} fronts still show their forecast on level 4`);
+          if (after.hint) throw new Error("the line about holding a front stayed after the first preview");
+          if (!after.taught) throw new Error("the first preview was not remembered");
           const b = await board(ctx.page);
           if (b.onPads) throw new Error("hovering sent a crew member");
         },
