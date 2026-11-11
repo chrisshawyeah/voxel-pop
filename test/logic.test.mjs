@@ -1,6 +1,8 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
+import { spawnSync } from 'node:child_process';
+import { fileURLToPath } from 'node:url';
 import { makeBoard, cloneBoard, removeCube, deploy, fire, step, settle, launch, target, isJammed, isWon, canFire, canReach, purgeCleared, isExposed, freeSlot, FLIGHT, tickGame, advance, forecast, forecastKey, fates, busy, revealLone, checkOf, pace, Attempt, FAST } from '../js/logic.js';
 import { LEVELS, buildLevel, dealLevel, levelPrint, rng } from '../js/levels.js';
 import { plan, greedy, greedyCheck, hastyCheck, hastyGreedy, lineHolds, playLine, onClock, earlyParks, forecastFirst, backtrack, forecastCheck, hastyForecastCheck, backtrackCheck, firingTime, curveMisses, GAPS, LAND, GREEDY_PLAYS, PARK_MIN } from '../tools/players.mjs';
@@ -515,6 +517,14 @@ test('the forecast in words wraps to fit a phone, under a short condition', () =
   for (const sel of ['.tip', '.tip b', '.tip small']) assert.doesNotMatch(rule(sel), /nowrap/, `${sel} may wrap`);
   assert.match(mainSrc, /tip\.style\.marginLeft = `\$\{Math\.max\(0, 6 - r\.left\) - Math\.max\(0, r\.right - \(innerWidth - 6\)\)\}px`/, 'and is moved inside the window');
   assert.equal(mainPart('IF_NONE'), "const IF_NONE = 'with no more sends';");
+});
+
+test('the deal picker\'s list mode ends with what it listed, not with "no deal"', () => {
+  const r = spawnSync(process.execPath, ['tools/pick-deals.mjs', '1', '--list', '--tries=1'], { cwd: fileURLToPath(new URL('..', import.meta.url)), encoding: 'utf8' });
+  assert.equal(r.status, 0, r.stderr);
+  assert.match(r.stderr, /^L1 Toadstool: deal \d+ /m, 'it lists deals');
+  assert.match(r.stdout.trim(), /^L1 Toadstool: \d+ deals? listed above/);
+  assert.doesNotMatch(r.stdout, /no deal/);
 });
 
 test('the forecast follower wins less without undo than with it, and its undos are counted', () => {

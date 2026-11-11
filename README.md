@@ -183,8 +183,9 @@ next to it as they are stored; when none does, the one that misses least, and it
 misses. A level's neighbours can change what fits it, so after picking a level pick the ones
 beside it again if `npm test` says the curve breaks there.
 `node tools/pick-deals.mjs 12 --set='{"crew":[40,70],"cols":4}'` tries other settings without
-editing the file, and `--list` prints every deal it finds with its measures instead of stopping
-at the first. Deals with more than 30 crew are skipped. `node tools/difficulty.mjs` prints every
+editing the file, and `node tools/pick-deals.mjs 12 --list` prints every deal it finds with its
+measures instead of stopping at the first, then how many it listed (it picks none). Deals with
+more than 30 crew are skipped. `node tools/difficulty.mjs` prints every
 level's size, crew, pads, "?" on screen, whether the planning player wins with a line that holds,
 the greedy rate against its band, the hasty greedy, forecast follower (waiting, against `follow`,
 and hasty) and undoing forecast follower rates, the follower's median undos (against `undos`) and
