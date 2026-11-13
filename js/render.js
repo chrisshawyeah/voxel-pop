@@ -34,7 +34,10 @@ export class Stage {
     this.renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 2));
     this.renderer.outputColorSpace = THREE.SRGBColorSpace;
     this.scene = new THREE.Scene();
-    this.camera = new THREE.PerspectiveCamera(32, 1, 0.1, 500);
+    // A long lens (14 degrees), standing well back: the rules see the sculpture along one straight
+    // line (js/logic.js clearView), and the narrower the lens, the closer the screen is to that, so
+    // the crew hit cubes the player can see (a 32-degree lens hid about 1 aimed cube in 12).
+    this.camera = new THREE.PerspectiveCamera(14, 1, 0.5, 1500);
     this.scene.add(new THREE.HemisphereLight('#ffffff', '#f3c9a6', 1.6));
     const sun = new THREE.DirectionalLight('#ffffff', 2.2);
     sun.position.set(6, 14, 10);
