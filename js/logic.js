@@ -386,11 +386,6 @@ export const canFire = (st, slot) => canReach(st, slot) && !(st.slots[slot].land
 // bring one into view sooner. Worked out once for each step of the view and each change to the
 // board (st.rev), since a pad asks every tick.
 export function target(st, c) {
-  if (st.blind) { // the forecast's board: in view or not, every side comes round in the end
-    let best = -1, rank = Infinity;
-    for (const i of st.exposed[c]) if (st.order[i] < rank) { rank = st.order[i]; best = i; }
-    return best;
-  }
   const key = viewKey(st) * 2 ** 28 + (st.rev % 2 ** 26) * 2 + (st.quiet > STALL ? 1 : 0);
   if (st.aimKey[c] === key) return st.aimCell[c];
   const m = viewMask(st), order = st.order, side = st.side;
@@ -527,9 +522,9 @@ export function setView(st, yaw, pitch, spin) {
 
 // What sending the front of line `col` now would do if no more crew were sent after it: the
 // rules run on a copy of the board, with the crew already on the pads, the shots in the air,
-// the landing pause and the one targeting rule, as if every side were in view (st.blind: where
-// the board ends up once the turntable has brought every side round, whatever the view does on
-// the way, and quick to work out), until that crew member has sent its last shot
+// the landing pause, the one targeting rule and the view as it is (the turntable turning and the
+// camera looking as they would if the player leaves them be; seeing every side at once instead was
+// wrong about 1 send in 1,000), until that crew member has sent its last shot
 // (it finishes and frees its pad) or nothing can fire any more (it parks, with `left` shots), and
 // until every crew member already on a pad that would finish without this send has finished or
 // is stuck. Those stuck are `strands`: [{ id, color, left }], pad by pad, the crew this send
@@ -538,7 +533,6 @@ export function setView(st, yaw, pitch, spin) {
 // pad is taken).
 export function forecast(st, col, land = 0, base = null) {
   const sim = cloneBoard(st);
-  sim.blind = true; // where the board ends up once every side has come round (target())
   const d = deploy(sim, col, land);
   if (!d) return null;
   const me = d.shooter;
@@ -563,13 +557,12 @@ export function forecast(st, col, land = 0, base = null) {
 export const forecastKey = f => (!f ? 'full' : !f.strands.length && f.finishes ? 'done' : `${f.left}|${f.strands.map(s => `${s.id}.${s.left}`).join(',')}`);
 
 // What becomes of each crew member already on a pad if nothing else is sent: the rules run on a
-// copy of the board, every side in view (as forecast() does), until nothing moves. A Map from crew id to the shots it is left with when it
+// copy of the board, with the view as it is (as forecast() does), until nothing moves. A Map from crew id to the shots it is left with when it
 // parks, 0 when it finishes and frees its pad. One run answers every pad, and the answer holds
 // until the next send or undo, since nothing else changes where the board is going. This is how
 // a crew member that a later send has robbed shows it at once, before it runs dry.
 export function fates(st) {
   const sim = cloneBoard(st);
-  sim.blind = true;
   const onPads = sim.slots.filter(Boolean);
   let quiet = 0;
   while (busy(sim) && quiet <= 2 * STALL) {

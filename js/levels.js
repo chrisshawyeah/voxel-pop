@@ -53,8 +53,8 @@ export const LEVELS = [
   { name: 'House', model: 'house', cols: 3, pads: 4, crew: [50, 80], hidden: 2, mix: 0.3, flip: 0.8, greedy: [15, 45], follow: [36, 45], undos: 5, deal: 28 },
   { name: 'Nesting Dolls', model: 'dolls', cols: 4, pads: 5, crew: [50, 80], hidden: 2, mix: 0.2, flip: 0.8, greedy: [15, 45], follow: [33, 45], undos: 5, deal: 25 },
   { name: 'Melon', model: 'melon', cols: 3, pads: 5, crew: [30, 50], hidden: 1, mix: 0.2, flip: 0.8, greedy: [70, 85], follow: [60, 80], undos: 2, deal: 21 },
-  { name: 'Castle', model: 'castle', cols: 4, pads: 3, crew: [60, 100], hidden: 3, mix: 0.6, flip: 0.8, greedy: [15, 45], follow: [30, 42], undos: 6, deal: 26 },
-  { name: 'Patchwork', model: 'patchwork', cols: 4, pads: 3, crew: [30, 50], hidden: 2, mix: 0, flip: 0.6, greedy: [15, 45], follow: [27, 40], undos: 6, deal: 15 },
+  { name: 'Castle', model: 'castle', cols: 4, pads: 3, crew: [60, 100], hidden: 3, mix: 0.6, flip: 0, greedy: [15, 45], follow: [24, 40], undos: 6, deal: 7 },
+  { name: 'Patchwork', model: 'patchwork', cols: 4, pads: 3, crew: [30, 50], hidden: 2, mix: 0, flip: 0.6, greedy: [15, 45], follow: [21, 36], undos: 6, deal: 15 },
   { name: 'Ringed Planet', model: 'planet', cols: 4, pads: 3, crew: [60, 100], hidden: 3, mix: 0.1, flip: 0.8, greedy: [15, 45], follow: [25, 38], undos: 6, deal: 37 },
 ];
 
