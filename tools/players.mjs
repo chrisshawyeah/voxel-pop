@@ -1,4 +1,6 @@
 // Test players for measuring a level, using the same rules and ticks as the game (js/logic.js).
+// The turntable turns on its own in every one of them (the board's st.spin), so a crew member
+// whose colour is round the back waits for it, as in the game.
 // greedy and plan wait for the pads to stop before each send; playLine, hastyGreedy and
 // hastyForecast (below) send while shots are still in the air, with the game's landing pause and
 // the game's own clock (pace() in js/logic.js: a tick runs three times as fast while there is
@@ -17,7 +19,7 @@
 //   only through the forecast on each front (js/logic.js forecast()).
 // forecastFirst, hastyForecast and backtrack (further down) play by that forecast, the way a
 // player who reads it does: they measure how much of a level the forecast plays for you.
-import { cloneBoard, deploy, settle, isWon, freeSlot, tickGame, isJammed, busy, forecast, fates, pace, removeCube } from '../js/logic.js';
+import { cloneBoard, deploy, settle, isWon, freeSlot, tickGame, isJammed, busy, forecast, fates, pace, removeCube, STALL } from '../js/logic.js';
 import { rng } from '../js/levels.js';
 
 // The game's landing pause (LAND in js/main.js) in ticks, and the gaps a quick player leaves
@@ -48,6 +50,7 @@ export function onClock(board, gap, choose, land = LAND, patient = false) {
   let sends = 0, t = 0;
   let ask = 0;  // when the player may tap (or look) next
   let part = 0; // how much of the tick under way has run, of its 3 at normal speed
+  let quiet = 0; // ticks since a shot last left or landed (a whole turn of that: nothing will change)
   const end = win => ({ win, sends, seconds: t / 90, ticks: st.tick });
   for (;;) {
     if (isWon(st)) return end(true);
@@ -66,8 +69,10 @@ export function onClock(board, gap, choose, land = LAND, patient = false) {
       ask = patient && g > 0 ? t + g : due;
     }
     if (ask < due && freeSlot(st) >= 0) { part += (ask - t) * speed; t = ask; continue; } // the tap falls before the next tick
-    tickGame(st);
+    const r = tickGame(st);
     t = due; part = 0;
+    if (r.shots.length || r.landed.length) quiet = 0;
+    else if (++quiet > 2 * STALL) return end(false);
   }
 }
 
@@ -138,8 +143,14 @@ export const lineHolds = (board, line) => GAPS.every(gap => playLine(board, line
 // forecast is what the screen shows: on levels 1 to 3 always, from level 4 a press and hold away
 // once the player has learned the hold (js/main.js marksShown()).
 export function byForecast(st, rand, land = LAND, skip = null) {
-  const base = st.slots.some(Boolean) ? fates(st) : new Map(); // where the crew on the pads are going
-  const seen = new Map(); // crew of the same colour and number fare the same
+  // The forecasts hold while the board does: kept on it until a shot leaves or lands, a crew member
+  // is sent or lands, or (with shots in the air) the next tick. A player asked again while it waits
+  // for a side to come round does not work them out again.
+  let key = `${st.rev}|${st.columns.map(c => c.length).join()}|${st.slots.map(s => (s ? `${s.id}.${s.count}.${s.land | 0}` : '_')).join()}`;
+  if (st.flying.length || st.slots.some(s => s && s.land > 0)) key += `@${st.tick}`;
+  if (!st._fc || st._fc.key !== key) st._fc = { key, base: st.slots.some(Boolean) ? fates(st) : new Map(), seen: new Map() };
+  const base = st._fc.base; // where the crew on the pads are going
+  const seen = st._fc.seen; // crew of the same colour and number fare the same
   const ticks = [], others = [], rest = [];
   st.columns.forEach((c, ci) => {
     if (!c.length || (skip && skip.has(ci))) return;
