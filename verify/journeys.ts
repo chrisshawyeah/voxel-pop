@@ -169,6 +169,39 @@ export const journeys = [
         },
       },
       {
+        // The crew hit only what the camera sees, so the view is part of the board: held, the
+        // turntable stops and the board takes the player's view; let go, it turns again.
+        caption: "Drag to turn the sculpture and tilt it",
+        highlight: true,
+        run: async (ctx: any) => {
+          const page = ctx.page;
+          const view = () => page.evaluate(() => (window as any).crumble.view);
+          const v0 = await view();
+          const box = await page.locator("#gl").boundingBox();
+          const x = box.x + box.width / 2, y = box.y + box.height / 2;
+          await page.mouse.move(x, y);
+          await page.mouse.down();
+          for (let k = 1; k <= 12; k++) { await page.mouse.move(x - k * 12, y + k * 7); await page.waitForTimeout(30); }
+          await page.waitForTimeout(250);
+          const held = await view();
+          await page.waitForTimeout(400);
+          const still = await view();
+          if (held.hand !== "drag" || held.spin !== 0) throw new Error(`the turntable kept turning while held (${JSON.stringify(held)})`);
+          if (still.yaw !== held.yaw) throw new Error(`the turntable moved from ${held.yaw} to ${still.yaw} while held still`);
+          if (held.pitch <= v0.pitch + 10) throw new Error(`dragging down did not tilt the camera up (pitch ${v0.pitch} to ${held.pitch})`);
+          const turned = Math.abs(((held.shown[0] - v0.shown[0] + Math.PI) % (2 * Math.PI) + 2 * Math.PI) % (2 * Math.PI) - Math.PI);
+          if (turned < 0.5) throw new Error(`dragging sideways turned the sculpture only ${turned.toFixed(2)} radians`);
+          await page.mouse.up();
+          const end = Date.now() + 8000;
+          for (;;) {
+            const v = await view();
+            if (v.spin > 0 && v.hand === "auto") break;
+            if (Date.now() > end) throw new Error(`the turntable did not turn on its own again after letting go (${JSON.stringify(v)})`);
+            await page.waitForTimeout(200);
+          }
+        },
+      },
+      {
         caption: "Crew on the pads",
         run: async (ctx: any) => {
           for (let k = 0; k < 3; k++) { await send(ctx.page, "can-hit"); await ctx.page.waitForTimeout(200); }

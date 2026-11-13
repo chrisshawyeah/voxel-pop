@@ -31,6 +31,7 @@ const RETRY_MS = 60000;   // a reload that came back as the old version is tried
 const LAST = LEVELS.length - 1;
 const TEACH_UNTIL = 2;    // levels 1 to 3 teach the first send and always show the forecast under each front
 const BUILD = document.querySelector('meta[name="build"]')?.content || 'dev';
+const calm = () => !!window.matchMedia?.('(prefers-reduced-motion: reduce)').matches; // fewer and shorter moves
 const ALL = (2 ** LEVELS.length) - 1;
 const bit = n => 2 ** n;
 
@@ -160,7 +161,8 @@ function start(n, fresh = false) {
   showStar();
   $('ending').hidden = true;
   lessonBreak();
-  showBoard();
+  showBoard(!(back instanceof R.Attempt));
+  lookAtBoard();
   $('loading').hidden = true;
   if (back === 'changed') say('Level changed. Restarted.', 2500);
   else say('', 0);
@@ -175,9 +177,9 @@ function showStar() {
 
 // Draws the attempt's board from scratch: at a level start, after an undo, after a restore.
 // Shots in the air are drawn again from the rules; old effects go.
-function showBoard() {
+function showBoard(build = false) {
   st = att.board;
-  stage.load(st, L.model);
+  stage.load(st, L.model, build);
   for (const el of leavers) el.remove();
   leavers.clear();
   clearedColours.clear();
@@ -188,7 +190,7 @@ function showBoard() {
   padState.length = 0;
   quietPads = true; // the pads are as they were: nobody newly parks or wakes
   boardChanged(true);
-  renderPads(); renderQueues(); progress();
+  renderPads(); renderQueues(false); progress();
   fx.shots.length = 0;
   for (const f of st.flying) shotFor(f);
   showReach(); teach();
@@ -200,14 +202,20 @@ const TICK = '<svg viewBox="0 0 12 12" aria-hidden="true"><path d="M2.5 6.4 5 8.
 function crewEl(s) {
   const el = document.createElement('span');
   el.className = 'crew' + (s.hidden ? ' egg' : '');
+  el.dataset.id = s.id;
   if (!s.hidden) el.style.setProperty('--c', st.palette[s.color]);
   el.innerHTML = `<span class="body"><span class="eyes"><i></i><i></i></span><b class="n">${s.hidden ? '?' : s.count}</b></span>`;
   return el;
 }
 const markEl = () => Object.assign(document.createElement('i'), { className: 'fc', hidden: true });
 
-function renderQueues() {
+// `slide`: crew still in the lines move from where they stood to where they stand now (after a
+// send the line steps up), and crew coming into view from the back fade in. Not when the board is
+// drawn from scratch.
+function renderQueues(slide = true) {
   const box = $('queues');
+  const was = new Map();
+  if (slide && !calm()) for (const el of box.querySelectorAll('.crew')) was.set(el.dataset.id, el.getBoundingClientRect());
   box.innerHTML = '';
   fronts = [];
   inspecting = -1;
@@ -251,6 +259,22 @@ function renderQueues() {
     box.appendChild(c);
   });
   labelFronts(true);
+  if (!was.size) return;
+  for (const el of box.querySelectorAll('.crew')) {
+    const r0 = was.get(el.dataset.id);
+    if (!r0) {
+      el.animate([{ opacity: 0, transform: 'translateY(10px) scale(0.8)' }, { opacity: 1, transform: 'none' }], { duration: 260, easing: 'ease-out' });
+      continue;
+    }
+    const r1 = el.getBoundingClientRect();
+    const k = r1.width / (el.offsetWidth || r1.width); // the slot's own scale (crew behind the front stand smaller)
+    const dx = (r0.left - r1.left) / k, dy = (r0.top - r1.top) / k, sc = r0.width / r1.width;
+    if (Math.abs(dx) < 1 && Math.abs(dy) < 1) continue;
+    el.animate([
+      { transform: `translate(${dx}px, ${dy}px) scale(${sc})`, transformOrigin: '0 0' },
+      { transform: 'none', transformOrigin: '0 0' },
+    ], { duration: 260, easing: 'cubic-bezier(.25,.9,.3,1.12)' });
+  }
 }
 
 // ---------- the whole of one line, front to back, without sending anyone ----------
@@ -333,11 +357,17 @@ function padLabel(i, awake = null, parks = 0) {
 // only its body inside, so the two never fight. The flight ends before the first shot (LAND).
 function flyFrom(el, from) {
   const to = el.getBoundingClientRect();
+  const dx = from.left - to.left, dy = from.top - to.top;
+  if (calm()) { el.animate([{ opacity: 0.4 }, { opacity: 1 }], { duration: 120 }); return; }
+  // A hop: it leaves its line stretched, arcs up over the pads and lands with a squash, all within
+  // the landing pause (LAND), so the first shot finds it standing.
   el.animate([
-    { transform: `translate(${from.left - to.left}px, ${from.top - to.top}px) scale(0.92)` },
-    { transform: 'translate(0, -6px) scale(1.05)', offset: 0.75 },
-    { transform: 'translate(0, 0)' },
-  ], { duration: 120, easing: 'cubic-bezier(.2,.8,.3,1)' });
+    { transform: `translate(${dx}px, ${dy}px) scale(1.12, 0.86)` },
+    { transform: `translate(${dx * 0.45}px, ${dy * 0.55 - 26}px) scale(0.88, 1.16)`, offset: 0.45 },
+    { transform: 'translate(0, -4px) scale(0.96, 1.06)', offset: 0.8 },
+    { transform: 'translate(0, 0) scale(1.14, 0.84)', offset: 0.9 },
+    { transform: 'none' },
+  ], { duration: 150, easing: 'cubic-bezier(.3,.7,.4,1)' });
 }
 
 function setCount(i, s) {
@@ -351,7 +381,7 @@ function recoil(i) {
   const el = padEls[i]?.querySelector('.body');
   if (!el || el._t > performance.now() - 70) return;
   el._t = performance.now();
-  el.animate([{ transform: 'scale(1)' }, { transform: 'scale(1.1, 0.88) translateY(3px)' }, { transform: 'scale(1)' }], { duration: 90 });
+  el.animate([{ transform: 'scale(1)' }, { transform: 'scale(1.12, 0.86) translateY(3px)', offset: 0.35 }, { transform: 'scale(0.97, 1.04)', offset: 0.7 }, { transform: 'scale(1)' }], { duration: 110 });
 }
 
 // A screen reader hears who parks, who wakes and when a pad frees, never every shot. What happens
@@ -644,6 +674,8 @@ function undo() {
   att.undo(); // counts it: a win after this is not a clean clear
   gen++;
   state = 'play'; jamClock = 0; winClock = 0; clock = 0;
+  st = att.board;
+  keepView(); // the board from before the send keeps the view on the screen now
   say('', 0);
   saveAttempt();
   showBoard();
@@ -665,6 +697,7 @@ function tick(dt) {
     if (left < need) { clock += left * speed; break; }
     left -= need; clock = 0;
     const landing = st.slots.some(s => s && s.land > 0);
+    viewBeforeTick();
     const { landed, shots, gone } = R.tickGame(st);
     for (const shot of shots) launch(shot);
     if (landed.length) afterHit(landed, gone);
@@ -720,7 +753,12 @@ function leave(slot) {
   document.body.appendChild(el);
   leavers.add(el);
   const gone = () => { el.remove(); leavers.delete(el); };
-  el.animate([{ transform: 'scale(1)', opacity: 1 }, { transform: 'translateY(-24px) scale(1.25)', opacity: 0 }], { duration: 260, easing: 'ease-in' }).finished.then(gone, gone);
+  fx.poof(r.left + r.width / 2, r.top + r.height / 2, el.style.getPropertyValue('--c') || '#fff');
+  el.animate([
+    { transform: 'none', opacity: 1 },
+    { transform: 'translateY(-14px) scale(1.12, 0.92) rotate(-6deg)', opacity: 1, offset: 0.35 },
+    { transform: 'translateY(-34px) scale(0.5) rotate(10deg)', opacity: 0 },
+  ], { duration: 320, easing: 'cubic-bezier(.3,.6,.5,1)' }).finished.then(gone, gone);
 }
 
 // Shots have landed, this tick, by the rules: their cubes pop now, the progress bar moves, a
@@ -750,6 +788,7 @@ function progress() {
 
 function colourCleared(c) {
   const col = st.palette[c];
+  stage.cleared(c);
   $('progress').animate([
     { boxShadow: `0 0 0 0 ${col}`, transform: 'scaleY(1)' },
     { boxShadow: `0 0 0 4px ${col}`, transform: 'scaleY(1.8)', offset: 0.3 },
@@ -858,9 +897,10 @@ window.addEventListener('blur', () => pressed.clear()); // a lift that will neve
 
 let last = performance.now();
 function frame(now) {
-  const dt = Math.min(0.05, (now - last) / 1000);
+  const dt = Math.max(0, Math.min(0.05, (now - last) / 1000)); // the first frame's time can come before the script's
   last = now;
   if (state === 'play') tick(dt);
+  showView(dt);
   stage.update(dt);
   fx.update(dt);
   requestAnimationFrame(frame);
@@ -883,8 +923,10 @@ function say(text, ms) {
 // the start of another level, or the ending. Otherwise it keeps playing this version and tries
 // again next time. A level left half-played is kept (saveAttempt) and checked against the new
 // version when it comes back.
+// (vendor/RoundedBoxGeometry.js is no longer used but stays in place: older versions still fetch it
+// here before they load a new one.)
 const FRESH = ['css/game.css', 'js/main.js', 'js/render.js', 'js/fx.js', 'js/audio.js', 'js/levels.js', 'js/logic.js', 'js/models.js',
-  'vendor/three.module.js', 'vendor/three.core.js', 'vendor/RoundedBoxGeometry.js'];
+  'vendor/three.module.js', 'vendor/three.core.js'];
 let checking = false;
 // The version the page last reloaded to load, and when: "abc1234@1762850000000".
 const lastReload = () => { const [build, at] = String(store.get(UPDATE_KEY) || '').split('@'); return { build, at: Number(at) || 0 }; };
@@ -926,27 +968,115 @@ document.addEventListener('visibilitychange', () => {
 window.addEventListener('pagehide', () => saveAttempt());
 window.addEventListener('pageshow', e => { if (e.persisted) checkForUpdate(); });
 
-// ---------- drag the sculpture to turn it (js/render.js turns it by speed, not by event) ----------
+// ---------- the view: the player turns and tilts the sculpture ----------
+// The crew hit only what the camera sees, so the view is part of the board (st.yaw, st.pitch and
+// st.spin in js/logic.js) and the screen draws the board's view, smoothed between ticks. A finger
+// or a mouse on the sculpture takes the view: sideways turns the turntable, up and down tilts the
+// camera, and before every tick while it is held the board takes the view the player sees
+// (att.view, kept in the attempt, so a saved attempt plays back to the same cubes). Let go, a
+// flick keeps it turning a moment; then it rests, and the turntable takes up its own turn again,
+// gently. Between levels and when out of room nothing ticks, and it just turns.
+const TURN_PX = 0.011;  // radians of turn per pixel dragged sideways
+const TILT_PX = 0.007;  // radians of tilt per pixel dragged up or down
+const FLING = 2.4;      // the fastest turn a flick leaves, radians a second
+const REST = 0.9;       // seconds the sculpture stays still after a drag before turning on its own
+const look = { yaw: R.yawRad(R.START_YAW), pitch: R.pitchRad(R.START_PITCH), hand: 'auto', vy: 0, vp: 0, rest: 0 };
+const wrapPi = a => a - 2 * Math.PI * Math.round(a / (2 * Math.PI));
+const tilted = p => Math.max(R.PITCH_MIN, Math.min(R.PITCH_MAX, p));
+
+// Before each tick: while the player has the sculpture (dragging, a flick, the rest after it), the
+// board takes their view, as far as the rules can tell (the turntable's step, the camera's height,
+// standing still); after the rest the turntable's own turn comes back one step every other tick.
+function viewBeforeTick() {
+  if (look.hand === 'auto') return;
+  if (look.hand === 'ramp') {
+    if (st.spin >= R.TURN) { look.hand = 'auto'; return; }
+    if (st.tick % 2 === 0) att.view(st.yaw, st.pitch, st.spin + 1);
+    return;
+  }
+  const y = R.yawUnits(look.yaw), p = R.pitchUnits(look.pitch);
+  if (st.spin || p !== st.pitch || Math.floor(y / R.VIEW_STEP) !== Math.floor(st.yaw / R.VIEW_STEP)) att.view(y, p, 0);
+}
+
+// The board takes exactly the view on the screen (an undo's board is from before the send).
+function keepView() {
+  if (look.hand === 'ramp') look.hand = 'auto';
+  att.view(R.yawUnits(look.yaw), R.pitchUnits(look.pitch), look.hand === 'auto' ? R.TURN : 0);
+}
+
+// A level's start, or a level coming back: the screen shows the board's view as it is. A board
+// left standing still (a page closed mid-drag) takes up its turn again.
+function lookAtBoard() {
+  look.yaw = R.yawRad(st.yaw); look.pitch = R.pitchRad(st.pitch);
+  if (look.hand !== 'drag') look.hand = st.spin < R.TURN ? 'ramp' : 'auto';
+}
+
+function showView(dt) {
+  if (look.hand === 'fling') {
+    look.yaw += look.vy * dt;
+    look.pitch = tilted(look.pitch + look.vp * dt);
+    const k = Math.pow(0.03, dt);
+    look.vy *= k; look.vp *= k;
+    if (Math.abs(look.vy) < 0.04 && Math.abs(look.vp) < 0.04) { look.hand = 'rest'; look.rest = REST; }
+  } else if (look.hand === 'rest') {
+    look.rest -= dt;
+    if (look.rest <= 0) {
+      if (state === 'play') { att.view(R.yawUnits(look.yaw), R.pitchUnits(look.pitch), 0); look.hand = 'ramp'; }
+      else look.hand = 'auto';
+    }
+  } else if (look.hand !== 'drag') {
+    if (state === 'play' && st) {
+      // Where the rules' turntable is between two ticks; any gap to it closes in about 0.2 s.
+      const wantY = R.yawRad(st.yaw + st.spin * (clock / FIRE_GAP)), wantP = R.pitchRad(st.pitch);
+      const k = Math.exp(-dt * 12);
+      look.yaw = wantY + wrapPi(look.yaw - wantY) * k;
+      look.pitch = wantP + (look.pitch - wantP) * k;
+    } else {
+      if (look.hand === 'ramp') look.hand = 'auto';
+      look.yaw += (R.yawRad(R.TURN) / FIRE_GAP) * dt;
+    }
+  }
+  stage.setView(look.yaw, look.pitch);
+}
+
 {
   const cv = $('gl');
-  let lastX = null, lastT = 0;
+  let finger = null, lastX = 0, lastY = 0, lastT = 0, vy = 0, vp = 0;
   cv.addEventListener('pointerdown', e => {
     sound.unlock();
+    if (finger !== null) return; // one finger turns it; a second does nothing
+    finger = e.pointerId;
     dragged = 0;
-    lastX = e.clientX; lastT = e.timeStamp;
+    lastX = e.clientX; lastY = e.clientY; lastT = e.timeStamp; vy = vp = 0;
     cv.setPointerCapture(e.pointerId);
-    stage.dragStart();
+    look.hand = 'drag'; look.vy = look.vp = 0;
   });
+  // The speed is distance over time, smoothed over about 60 ms, so it does not depend on how often
+  // the screen reports the finger.
   cv.addEventListener('pointermove', e => {
-    if (lastX === null) return;
-    stage.drag(e.clientX - lastX, e.timeStamp - lastT);
-    dragged += Math.abs(e.clientX - lastX);
-    lastX = e.clientX; lastT = e.timeStamp;
+    if (e.pointerId !== finger) return;
+    const dx = e.clientX - lastX, dy = e.clientY - lastY, ms = e.timeStamp - lastT;
+    const p0 = look.pitch;
+    look.yaw += dx * TURN_PX;
+    look.pitch = tilted(look.pitch + dy * TILT_PX);
+    if (ms > 0) {
+      const k = Math.min(1, ms / 60);
+      vy += ((dx * TURN_PX) / (ms / 1000) - vy) * k;
+      vp += ((look.pitch - p0) / (ms / 1000) - vp) * k;
+    }
+    dragged += Math.abs(dx) + Math.abs(dy);
+    lastX = e.clientX; lastY = e.clientY; lastT = e.timeStamp;
   });
+  // Let go: a finger still moving leaves it turning (at most FLING); one that stopped first leaves
+  // it still.
   const end = e => {
-    if (lastX === null) return;
-    stage.dragEnd(e.timeStamp - lastT);
-    lastX = null;
+    if (e.pointerId !== finger) return;
+    finger = null;
+    const still = e.timeStamp - lastT > 90;
+    look.vy = still ? 0 : Math.max(-FLING, Math.min(FLING, vy));
+    look.vp = still ? 0 : Math.max(-FLING / 2, Math.min(FLING / 2, vp));
+    look.hand = Math.abs(look.vy) > 0.04 || Math.abs(look.vp) > 0.04 ? 'fling' : 'rest';
+    look.rest = REST;
   };
   cv.addEventListener('pointerup', end);
   cv.addEventListener('pointercancel', end);
@@ -1000,6 +1130,7 @@ window.crumble = {
   get sends() { return att.sends.length; }, get undos() { return att.undos; },
   get clean() { return !!(cleanMask & bit(current)); }, get speed() { return speed; },
   get drawn() { return { shots: fx.shots.length, cubes: stage.shown }; },
+  get view() { return { yaw: st.yaw, pitch: st.pitch, spin: st.spin, hand: look.hand, shown: [look.yaw, look.pitch] }; },
   snapshot,
   start: n => start(n, true), send: onSend, undo, checkForUpdate,
 };
