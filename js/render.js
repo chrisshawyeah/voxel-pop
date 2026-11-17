@@ -14,8 +14,8 @@ const POP = 0.09;       // seconds a hit cube takes to pop
 const GLOW = 0.1;       // seconds a cube takes to glow white before its shot lands
 const TABLE_TOP = 0.3;  // the turntable's top, in world units
 const GRAVITY = 24;
-const DROP = 6;         // how high the sculpture drops from at a level's start
-const DROP_TIME = 0.42; // seconds it falls
+const DROP = 1.2;       // how high the sculpture drops from at a level's start: a short hop, so it never leaves the view
+const DROP_TIME = 0.26; // seconds it falls
 const calm = () => window.matchMedia?.('(prefers-reduced-motion: reduce)').matches;
 const tmpM = new THREE.Matrix4();
 const tmpV = new THREE.Vector3();
@@ -170,7 +170,7 @@ export class Stage {
     this.table.scale.set(rad, 1, rad); this.table.position.y = 0;
     this.tableRing.scale.set(rad, rad, 1); this.tableRing.position.y = TABLE_TOP - 0.02;
     this.dots.scale.set(rad, 1, rad); this.dots.position.y = TABLE_TOP;
-    this.shadow.scale.set(rad * 2.9, rad * 2.9, 1); this.shadow.position.y = -0.32;
+    this.shadow.scale.set(rad * 2.2, rad * 2.2, 1); // fades out at the stage's edges, never cut off by them this.shadow.position.y = -0.32;
     this.size = { top: top + TABLE_TOP, reach, rad };
     this.flashes.clear();
     this.pops.length = 0;
@@ -206,21 +206,21 @@ export class Stage {
 
   // Fits the sculpture and its turntable into the stage from the camera's height now, whatever
   // the shape and the screen: every point round the turntable's edge and the sculpture's top must
-  // fall inside the view.
+  // fall inside the view, with more room left at the bottom, where the hint sits over the stage.
   frame() {
     if (!this.size) return;
     const { top, reach, rad } = this.size;
     const p = this.pitch;
     const sp = Math.sin(p), cp = Math.cos(p);
     const ty = -0.3 + (top + 0.3) * 0.46;
-    const tanV = Math.tan(THREE.MathUtils.degToRad(this.camera.fov) / 2) * 0.9;
-    const tanH = tanV * this.camera.aspect * 0.98;
+    const tan = Math.tan(THREE.MathUtils.degToRad(this.camera.fov) / 2);
+    const tanUp = tan * 0.92, tanDown = tan * 0.74, tanH = tan * this.camera.aspect * 0.9;
     let d = 0;
     const fit = (x, y, z) => {
       const dy = y - ty;
       const depth = dy * sp + z * cp; // toward the camera
       const up = dy * cp - z * sp;
-      d = Math.max(d, depth + Math.abs(x) / tanH, depth + Math.abs(up) / tanV);
+      d = Math.max(d, depth + Math.abs(x) / tanH, depth + Math.abs(up) / (up > 0 ? tanUp : tanDown));
     };
     for (let k = 0; k < 24; k++) {
       const a = (k / 24) * Math.PI * 2, c = Math.cos(a), s = Math.sin(a);
@@ -457,7 +457,7 @@ export class Stage {
       r.life -= dt;
       if (r.life <= 0) { r.visible = false; continue; }
       const e = 1 - r.life / 0.75;
-      const s = rad * (0.7 + easeOutCubic(e) * 0.9);
+      const s = rad * (0.35 + easeOutCubic(e) * 0.65); // across the turntable to its rim, never past the stage's edges
       r.scale.set(s, s, 1);
       r.material.opacity = 0.9 * (1 - e);
     }

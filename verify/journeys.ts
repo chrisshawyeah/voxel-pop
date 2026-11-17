@@ -124,7 +124,7 @@ export const journeys = [
       { expect: "Level 1", caption: "Toadstool" },
       { expect: "Tap the front crew", caption: "What to do" },
       {
-        caption: "Ready crew shine, and level 1 shows what each send would do",
+        caption: "Ready crew shine, sends forecast",
         run: async (ctx: any) => {
           const wrong = await ctx.page.evaluate(() => {
             const st = (window as any).crumble.board;
@@ -143,7 +143,7 @@ export const journeys = [
         },
       },
       {
-        caption: "A tap behind the front shows the whole line",
+        caption: "Tap behind: the whole line",
         run: async (ctx: any) => {
           const before = await board(ctx.page);
           await ctx.page.locator("#queues .col .slot.s2").first().click({ timeout: 5000 });
@@ -171,7 +171,7 @@ export const journeys = [
       {
         // The crew hit only what the camera sees, so the view is part of the board: held, the
         // turntable stops and the board takes the player's view; let go, it turns again.
-        caption: "Drag to turn the sculpture and tilt it",
+        caption: "Drag to turn and tilt",
         highlight: true,
         run: async (ctx: any) => {
           const page = ctx.page;
@@ -192,7 +192,9 @@ export const journeys = [
           const turned = Math.abs(((held.shown[0] - v0.shown[0] + Math.PI) % (2 * Math.PI) + 2 * Math.PI) % (2 * Math.PI) - Math.PI);
           if (turned < 0.5) throw new Error(`dragging sideways turned the sculpture only ${turned.toFixed(2)} radians`);
           await page.mouse.up();
-          const end = Date.now() + 8000;
+          // The rest and the turn coming back take about 1.5 s of game time; a slow test browser runs
+          // the game slower than real time (each frame counts at most 50 ms), so allow plenty.
+          const end = Date.now() + 20000;
           for (;;) {
             const v = await view();
             if (v.spin > 0 && v.hand === "auto") break;
@@ -251,7 +253,7 @@ export const journeys = [
       { expect: "Level 4", caption: "Level 4" },
       { expect: "Hold a front crew to preview. Tap to send.", caption: "Level 4 teaches the preview" },
       {
-        caption: "Every front shows its forecast until the first preview, then only when asked",
+        caption: "Forecasts until the first preview",
         run: async (ctx: any) => {
           const marks = () => ctx.page.evaluate(() => Array.from(document.querySelectorAll("#queues .front .fc")).filter(e => !(e as HTMLElement).hidden).length);
           const fronts = await ctx.page.evaluate(() => document.querySelectorAll("#queues .col button.front").length);
@@ -316,7 +318,7 @@ export const journeys = [
         },
       },
       {
-        caption: "A reload brings the level back as it was",
+        caption: "Reload keeps the level",
         run: async (ctx: any) => {
           const end = Date.now() + 30_000;
           while (!(await quiet(ctx.page))) {
@@ -397,7 +399,7 @@ export const journeys = [
         },
       },
       {
-        caption: "The message fits a phone held sideways",
+        caption: "Message fits a sideways phone",
         run: async (ctx: any) => {
           const size = ctx.page.viewportSize() ?? { width: 1280, height: 800 };
           try {
