@@ -2,11 +2,16 @@
 
 A cube-popping puzzle. A sculpture made of coloured cubes turns in the middle. Tap the front
 crew member of a line to send it up to a launch pad, where it pops cubes of its colour until
-its number runs out. A crew member can hit any cube on the outside of the sculpture, from any
-side: a cube with a face on the open air around it (the turntable under the sculpture is not
-air, and nor is air sealed inside a hollow until the hollow is broken into). So the sculpture is
-eaten from the outside in, and the puzzle is in its layers: a colour hidden inside comes out only
-as the cubes covering it go, and a crew member whose colour is still hidden waits on its pad,
+its number runs out. A crew member hits only cubes you can see: a cube on the outside of the
+sculpture (nothing between it and the outside along a straight line in from the front, back,
+left, right or top; never from below), on a side that faces the camera now, with nothing in the
+way between it and the camera. The cubes stand flush, so nothing behind them shows through. The
+sculpture turns on its turntable, so its sides come round in turn; drag it to turn it yourself,
+and drag up or down to tilt the camera. Crew who have waited a while with nothing of theirs in
+view make the camera look higher, then lower (into a pit, under a part that sticks out); only
+after about 17 seconds of that may a shot take a cube out of sight. So the sculpture is eaten
+from the outside in, and the puzzle is in its layers: a colour hidden inside comes out only as
+the cubes covering it go, and a crew member whose colour is still hidden waits on its pad,
 taking room, until then. Clear every cube to win. If every pad is full and
 none of them can hit anything, you are out of room: a tap takes back your last send, and another
 tap the one before, back to the start of the level if need be.
@@ -108,8 +113,10 @@ Play: https://chrisshawyeah.github.io/voxel-pop/
   reload comes back to the level being played. A number that is not a whole level from 1 to 20 is
   rounded and kept inside that range; when the browser blocks storage the game plays on and the
   address follows the level being played instead.
-- Drag the sculpture to turn it. A flick keeps turning a little, never fast, and the slow
-  automatic turn waits a second after a drag.
+- Drag the sculpture sideways to turn it, up or down to tilt the camera. A flick keeps turning a
+  little; the turntable stays still for a moment after you let go, then takes up its own turn
+  again. While you hold it the crew aim at what you see, and a saved attempt keeps every turn, so
+  it comes back to the same cubes.
 - The crew buttons work with a tap, a click, or Tab then Enter or Space.
 - In a short window (a phone held sideways, a short laptop window) the sculpture sits beside the
   pads and lines.
@@ -123,7 +130,7 @@ No build step and nothing to install. Every file is plain JavaScript the browser
 | The levels: order, crew sizes, lines, pads, hidden crew, how hard | `js/levels.js`, the `LEVELS` list at the top. Every setting is explained there. After a change, pick a new deal (below). |
 | The sculptures, or add your own | `js/models.js`. Each one is a short function; the top of the file says how. |
 | The colours | `COLORS` at the top of `js/models.js`. No two colours in one sculpture should be easy to mix up, since crew are told apart by colour alone. |
-| The rules: what can be hit, which cube a shot takes, when you are out of room | `js/logic.js` |
+| The rules: what can be hit, what the camera sees, which cube a shot takes, when you are out of room | `js/logic.js` |
 | What a win, a clean clear, a loss and the ending do, shot speed | `js/main.js` (`FIRE_GAP`, `LAND`, `NEXT_AFTER`, `win()`, `ending()`, `jam()`, `tick()`); how long a shot flies is `FLIGHT` in `js/logic.js` |
 | The 3x speed-up: when, and how fast | `pace()` and `FAST` in `js/logic.js` (the game and the timed test players both ask it before every tick) |
 | Undo, the undo count, and the attempt kept in storage | `Attempt` in `js/logic.js` (a copy of the board before each send; `save()` and `restore()`); `undo()`, `saveAttempt()`, `savedAttempt()` in `js/main.js`. Change `RULES` in `js/logic.js` when a rules change makes old saves wrong |
@@ -132,7 +139,8 @@ No build step and nothing to install. Every file is plain JavaScript the browser
 | When a new version loads | `checkForUpdate()` and `reloadAt()` in `js/main.js` (`FRESH` lists every file that must come through first) |
 | The look of the crew, pads, top bar and short-window layout | `css/game.css` |
 | Sounds | `js/audio.js` (every sound is made in code). Ordinary pops are soft and at most about 9 a second (`POP_GAP`); the bright rising notes are for a crew member finishing, a colour cleared and a win. |
-| The 3D look: cubes, lights, camera, turn speed | `js/render.js` (`FLING` and `AUTO_REST` for turning by hand) |
+| The 3D look: cubes, lights, camera framing, chips, puffs, the build at a level's start | `js/render.js` |
+| Turning and tilting by hand | the view section of `js/main.js` (`TURN_PX`, `TILT_PX`, `FLING`, `REST`); the turntable's own turn, the camera's range and how long crew wait before the camera looks around are `TURN`, `PITCH_MIN`/`PITCH_MAX`, `SEEK`, `LOOK` and `STALL` in `js/logic.js` |
 
 To try a change on your own computer, serve the folder and open it (the page loads modules,
 so opening `index.html` straight from the disk does not work):

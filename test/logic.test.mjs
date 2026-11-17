@@ -3,7 +3,8 @@ import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
-import { makeBoard, cloneBoard, removeCube, deploy, fire, step, settle, launch, target, isJammed, isWon, canFire, canReach, purgeCleared, isExposed, freeSlot, FLIGHT, tickGame, advance, forecast, forecastKey, fates, busy, revealLone, checkOf, pace, Attempt, FAST } from '../js/logic.js';
+import { makeBoard, cloneBoard, removeCube, deploy, fire, step, settle, launch, target, isJammed, isWon, canFire, canReach, purgeCleared, isExposed, freeSlot, FLIGHT, tickGame, advance, forecast, forecastKey, fates, busy, revealLone, checkOf, pace, Attempt, FAST,
+  setView, clearView, viewMask, YAW_STEPS, START_YAW, START_PITCH, PITCH_STEPS, TURN, SEEK, LOOK, STALL, SIDE_NAMES } from '../js/logic.js';
 import { LEVELS, buildLevel, dealLevel, levelPrint, rng } from '../js/levels.js';
 import { plan, greedy, greedyCheck, hastyCheck, hastyGreedy, lineHolds, playLine, onClock, earlyParks, forecastFirst, backtrack, forecastCheck, hastyForecastCheck, backtrackCheck, firingTime, curveMisses, GAPS, LAND, GREEDY_PLAYS, PARK_MIN } from '../tools/players.mjs';
 
@@ -37,7 +38,7 @@ const readyLine = (st, k = 0) => {
   return behind >= 0 ? behind : st.columns.findIndex(c => c.length);
 };
 
-test('a cube can be hit from any side while one of its faces touches the outside air', () => {
+test('a cube is in sight while it is the first cube along a straight line in from a side or the top', () => {
   const m = solid(3);
   const st = makeBoard(m);
   assert.equal(st.exposed[0].size, 25, 'every cube of a 3x3x3 block but the middle one and the one under it');
@@ -49,8 +50,10 @@ test('a cube can be hit from any side while one of its faces touches the outside
   assert.equal(st.exposed[0].has(at(m, 1, 1, 1)), true, 'taking a cube from the side opens the one behind it');
   assert.equal(isExposed(st, at(m, 1, 0, 1)), false, 'but not the one under that');
   removeCube(st, at(m, 1, 1, 1));
-  assert.equal(st.exposed[0].has(at(m, 1, 0, 1)), true);
-  assert.equal(st.exposed[0].size, 25);
+  assert.equal(isExposed(st, at(m, 1, 0, 1)), false, 'a tunnel in from the side does not show the floor at its end: no straight line from outside reaches it');
+  assert.equal(st.side[at(m, 1, 1, 2)] & (1 << SIDE_NAMES.indexOf('back')), 1 << SIDE_NAMES.indexOf('back'), 'the cube at the end of the tunnel is in sight along it, from the back');
+  removeCube(st, at(m, 1, 2, 1));
+  assert.equal(isExposed(st, at(m, 1, 0, 1)), true, 'opened from above, it is in sight from the top');
 });
 
 test('a cube sealed inside cannot be hit, and can be the moment a cube beside it goes', () => {
@@ -66,7 +69,7 @@ test('a cube sealed inside cannot be hit, and can be the moment a cube beside it
   assert.deepEqual([...st.exposed[1]], [CORE], 'so it does when the lid goes');
 });
 
-test('air sealed inside a hollow does not open its walls until the hollow is opened', () => {
+test('a hollow opened from above shows only what is straight down it', () => {
   // A 5x5x5 red block with an empty cell in the middle, walled in green on its six sides.
   const m = solid(5);
   const walls = [[1, 2, 2], [3, 2, 2], [2, 1, 2], [2, 3, 2], [2, 2, 1], [2, 2, 3]];
@@ -77,7 +80,7 @@ test('air sealed inside a hollow does not open its walls until the hollow is ope
   removeCube(st, at(m, 2, 4, 2));
   assert.deepEqual([...st.exposed[1]], [at(m, 2, 3, 2)], 'the top wall opens from above; the rest still face sealed air');
   removeCube(st, at(m, 2, 3, 2));
-  assert.deepEqual([...st.exposed[1]].sort((a, b) => a - b), walls.filter(([, y]) => y !== 3).map(([x, y, z]) => at(m, x, y, z)).sort((a, b) => a - b), 'breaking in lets the air in: every wall left opens at once');
+  assert.deepEqual([...st.exposed[1]], [at(m, 2, 1, 2)], 'down the shaft the floor of the hollow is in sight; its side walls face no straight line out');
   assert.equal(isExposed(st, at(m, 2, 0, 2)), false, 'and not the cube under the floor');
   removeCube(st, at(m, 2, 1, 2));
   assert.equal(isExposed(st, at(m, 2, 0, 2)), true, 'until the floor goes');
@@ -96,10 +99,10 @@ test('a shot takes its cube when it leaves, and opens what is behind it only whe
     assert.equal(isJammed(st), false, 'a shot in the air is not a jam');
     assert.equal(isWon(st), false);
   }
-  assert.equal(st.slots[0], null, 'red has sent all five shots and left');
+  assert.ok(st.slots[0] && st.slots[0].count > 0, 'red has shots left for the sides facing away from the camera');
   const land = step(st);
   assert.deepEqual(land.landed, [LID]);
-  assert.deepEqual(land.shots.map(s => s.cell), [CORE], 'green opens when the lid lands, and fires the same tick');
+  assert.ok(land.shots.some(s => s.cell === CORE && s.slot === 1), 'green opens when the lid lands, and fires the same tick');
   assert.equal(isWon(st), false, 'not won while the last shot is in the air');
   settle(st);
   assert.equal(isWon(st), true);
@@ -147,11 +150,11 @@ test('one targeting rule: the highest cube first, then the one farthest out, nev
   assert.deepEqual(order.slice(0, 4).map(i => i % 3 !== 1 && Math.floor(i / 9) !== 1), [true, true, true, true], 'its four corners before its middle');
   assert.equal(order[8], at(m, 1, 2, 1), 'the middle of the top layer last');
   assert.equal(isWon(st), true);
-  // The same taps give the same board, and waiting longer before a tap changes nothing.
+  // The same taps at the same ticks give the same board (the turntable turns the same way).
   const L = buildLevel(8);
   const a = cloneBoard(L.board), b = cloneBoard(L.board);
   for (let k = 0; k < 6; k++) {
-    settle(a); settle(b); for (let t = 0; t < 7; t++) step(b);
+    settle(a); advance(b, a.tick);
     const ci = readyLine(a, k);
     deploy(a, ci); deploy(b, ci);
   }
@@ -159,6 +162,108 @@ test('one targeting rule: the highest cube first, then the one farthest out, nev
   assert.ok(a.cleared > 0);
   assert.deepEqual([a.h1, a.h2, a.cleared], [b.h1, b.h2, b.cleared]);
   assert.deepEqual(a.cells, b.cells);
+});
+
+// A 3 x 2 x 3 red block with one green cube at the bottom of its back: in sight only from the back.
+const backOnly = () => {
+  const cubes = [];
+  for (let x = 0; x < 3; x++) for (let y = 0; y < 2; y++) for (let z = 0; z < 3; z++) cubes.push([x, y, z, x === 1 && y === 0 && z === 0 ? 2 : 1]);
+  return grid(3, 2, 3, cubes);
+};
+// A 5 x 2 x 5 pit: a red floor with one green cube in its middle, walled in red all round.
+const pit = () => {
+  const cubes = [];
+  for (let x = 0; x < 5; x++) for (let z = 0; z < 5; z++) {
+    cubes.push([x, 0, z, x === 2 && z === 2 ? 2 : 1]);
+    if (x === 0 || x === 4 || z === 0 || z === 4) cubes.push([x, 1, z, 1]);
+  }
+  return grid(5, 2, 5, cubes);
+};
+const PIT = 2 + 5 * (0 + 2 * 2);
+
+test('crew hit only cubes on a side facing the camera; the turntable brings the rest round', () => {
+  const m = backOnly();
+  const st = makeBoard(m);
+  const green = at(m, 1, 0, 0);
+  assert.equal(st.side[green], 1 << SIDE_NAMES.indexOf('back'), 'the green cube is in sight from the back only');
+  assert.equal(canReach(st, 0) || true, true);
+  st.slots = [crew(0, 1, 1)];
+  assert.equal(target(st, 1), -1, 'the back faces away from the camera at the start: green waits');
+  assert.equal(canReach(st, 0), true, 'yet it is not stuck: its cube is in sight from a side');
+  assert.equal(isJammed(st), false);
+  assert.ok(setView(st, (START_YAW + YAW_STEPS / 2) % YAW_STEPS, START_PITCH, 0), 'turned half round, the back faces the camera');
+  assert.equal(target(st, 1), green);
+  // Left to the turntable, the back comes round within half a turn.
+  const t = makeBoard(m);
+  t.slots = [crew(0, 1, 1)];
+  let at0 = -1;
+  for (let k = 0; k < YAW_STEPS / TURN && at0 < 0; k++) if (step(t).shots.length) at0 = t.tick;
+  assert.ok(at0 > 0 && at0 < (YAW_STEPS / TURN) * 0.75, `the turntable brings it round (tick ${at0})`);
+});
+
+test('a cube hidden from the camera by a part of the sculpture is not hit; tilting up shows it', () => {
+  const st = makeBoard(pit());
+  assert.ok(st.side[PIT] & (1 << SIDE_NAMES.indexOf('top')), 'the green floor is in sight from the top');
+  assert.equal(clearView(st, PIT, viewMask(st)), false, 'but from the camera low down the pit walls hide it');
+  assert.equal(target(st, 1), -1, 'so green waits');
+  setView(st, START_YAW, PITCH_STEPS - 1, 0);
+  assert.equal(clearView(st, PIT, viewMask(st)), true, 'looking down from high up it is in view');
+  assert.equal(target(st, 1), PIT);
+});
+
+test('crew who wait with nothing in view make the camera look higher, then lower; held still they hit a hidden cube in the end', () => {
+  // Turning on its own: the camera rises after SEEK ticks of waiting and finds the pit's floor.
+  const a = makeBoard(pit());
+  a.slots = [crew(0, 1, 1)];
+  let shotAt = -1;
+  while (shotAt < 0 && a.tick < 2 * STALL) if (step(a).shots.length) shotAt = a.tick;
+  assert.ok(shotAt > SEEK && shotAt < SEEK + LOOK, `the camera looked higher and green fired at tick ${shotAt}`);
+  assert.ok(a.pitch > START_PITCH);
+  settle(a);
+  assert.equal(a.pitch, a.home, 'once something flies the camera goes back to where it was');
+  // Held still by the player, nothing moves the camera: after STALL ticks green takes the hidden cube.
+  const b = makeBoard(pit());
+  setView(b, START_YAW, START_PITCH, 0);
+  b.slots = [crew(0, 1, 1)];
+  shotAt = -1;
+  while (shotAt < 0 && b.tick < 2 * STALL) if (step(b).shots.length) shotAt = b.tick;
+  assert.equal(b.pitch, START_PITCH);
+  assert.ok(shotAt > STALL && shotAt < STALL + 5, `held still, green fired at the hidden cube at tick ${shotAt}`);
+});
+
+test('the view the player turns to is kept with the attempt: undo, save and restore give the same board', () => {
+  const L = buildLevel(4);
+  const a = new Attempt(cloneBoard(L.board));
+  a.send(readyLine(a.board), LAND);
+  for (let t = 0; t < 20; t++) tickGame(a.board);
+  assert.equal(a.view(a.board.yaw, a.board.pitch, a.board.spin), false, 'no change, nothing kept');
+  assert.ok(a.view(1000, 50, 0));
+  for (let t = 0; t < 30; t++) tickGame(a.board);
+  assert.equal(a.board.yaw, 1000, 'held still');
+  assert.ok(a.view(1700, 12, 0));
+  assert.ok(a.view(1720, 12, 0));
+  assert.equal(a.views.length, 2, 'a second change in the same tick replaces the first');
+  for (let t = 0; t < 10; t++) tickGame(a.board);
+  assert.ok(a.view(1720, 12, TURN), 'let go');
+  a.send(readyLine(a.board, 1), LAND);
+  for (let t = 0; t < 60; t++) tickGame(a.board);
+  assert.ok(a.view(300, 40, 0));
+  for (let t = 0; t < 15; t++) tickGame(a.board);
+  const save = JSON.parse(JSON.stringify(a.save()));
+  assert.equal(save.views.length, 4);
+  assert.deepEqual(save.marks, [0, 3]);
+  const b = Attempt.restore(L.board, save, LAND);
+  assert.ok(b, 'the attempt comes back');
+  assert.deepEqual(checkOf(b.board), checkOf(a.board));
+  assert.deepEqual([b.board.yaw, b.board.pitch, b.board.spin], [a.board.yaw, a.board.pitch, a.board.spin]);
+  assert.deepEqual(b.views, a.views);
+  // A save from before views were kept, or with broken ones, is turned down or plays without them.
+  assert.equal(Attempt.restore(L.board, { ...save, views: [[5, 99999, 0, 0]] }, LAND), null);
+  assert.equal(Attempt.restore(L.board, { ...save, marks: [3, 0] }, LAND), null);
+  // Undo takes back the views since the last send with it.
+  a.undo();
+  assert.equal(a.views.length, 3);
+  assert.deepEqual(a.board.yaw, b.before[1].yaw);
 });
 
 test('fire() is one shot that lands at once, through the same launch and land', () => {
@@ -286,7 +391,7 @@ function hittable(b) {
 }
 const hitList = b => b.exposed.map(set => [...set].sort((x, y) => x - y));
 
-test('Robot: the legs and feet under its body can be hit from the start', () => {
+test('Robot: the legs and feet under its body can be hit from the start, and all of them in the end', () => {
   const n = LEVELS.findIndex(d => d.model === 'robot');
   const L = buildLevel(n);
   const m = L.model, st = L.board;
@@ -296,14 +401,15 @@ test('Robot: the legs and feet under its body can be hit from the start', () => 
   const legs = of(grey, 2, 5), feet = of(charcoal, 0, 1);
   const legsOpen = legs.filter(i => st.exposed[grey].has(i)), feetOpen = feet.filter(i => st.exposed[charcoal].has(i));
   console.log(`  Robot at the start: ${legsOpen.length} of ${legs.length} leg cubes and ${feetOpen.length} of ${feet.length} foot cubes can be hit`);
-  // The middle of each leg and foot is circuits now (js/models.js), so every grey leg cube and
-  // every charcoal foot cube left has a face on the air.
+  // The middle of each leg and foot is circuits now (js/models.js). Every leg and foot cube on the
+  // outside is in sight from a side; the inner sides of the two legs face each other, and come
+  // into sight as the cubes in front of them go.
   assert.equal(legs.length, 96);
-  assert.equal(legsOpen.length, 96, 'every grey leg cube');
+  assert.ok(legsOpen.length >= 60, 'most grey leg cubes');
   assert.equal(feet.length, 72);
-  assert.equal(feetOpen.length, 72, 'every charcoal foot cube');
+  assert.ok(feetOpen.length >= 48, 'most charcoal foot cubes');
   const underBody = legsOpen.filter(i => y(i) === 5 && m.cells[i + m.sx] && m.cells[i + m.sx] !== grey + 1);
-  assert.ok(underBody.length >= 20, `${underBody.length} leg cubes with the body right on top of them can be hit`);
+  assert.ok(underBody.length >= 10, `${underBody.length} leg cubes with the body right on top of them can be hit`);
   // A grey crew member sent first, with as many shots as there are grey cubes, pops all of them, the
   // legs too, and leaves everything else standing: nothing above the legs had to go.
   const b = cloneBoard(st);
@@ -316,7 +422,7 @@ test('Robot: the legs and feet under its body can be hit from the start', () => 
   let firstLeg = -1;
   while (busy(a.board)) {
     const r = tickGame(a.board);
-    if (firstLeg < 0 && r.landed.some(i => legs.includes(i))) firstLeg = a.board.cleared;
+    if (firstLeg < 0 && r.landed.some(i => legs.includes(i))) { firstLeg = a.board.cleared; console.log(`  first leg cube hit at tick ${a.board.tick}`); }
   }
   assert.ok(firstLeg > 0, 'a leg cube was hit');
   assert.equal(a.board.remaining[grey], 0, 'every grey cube, legs included');

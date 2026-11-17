@@ -1,12 +1,16 @@
-// The flat effects layer over everything: shots that home in on their cube, and confetti.
+// The flat effects layer over everything: shots that home in on their cube, the flash as each
+// leaves its pad, the puff when a crew member leaves, and confetti.
 
-const NEAR = 2 / 3; // the cube starts to flash for the last third of a shot's flight (0.1 s)
+const NEAR = 2 / 3; // the cube starts to glow for the last third of a shot's flight (0.1 s)
+const TRAIL = 9;    // points kept of each shot's path, for its tail
 
 export class Fx {
   constructor(canvas) {
     this.canvas = canvas;
     this.g = canvas.getContext('2d');
     this.shots = [];
+    this.rings = [];   // muzzle flashes and puffs: expanding rings that fade
+    this.flashAt = new Map(); // when each pad (by its x) last flashed
     this.confetti = [];
     this.resize();
   }
@@ -24,6 +28,21 @@ export class Fx {
   // (js/main.js pops the cube then). near() runs once, when it is NEAR of the way there.
   shoot(x, y, color, target, progress, near) {
     this.shots.push({ x0: x, y0: y, color, target, progress, near, bend: (Math.random() - 0.5) * 90, trail: [] });
+    // A flash at the pad, at most one every 90 ms there (a pad can fire every tick).
+    const key = Math.round(x), now = performance.now();
+    if (!(this.flashAt.get(key) > now - 90)) { this.flashAt.set(key, now); this.ring(x, y, color, 4, 18, 0.16, 3); }
+  }
+
+  // A ring at (x, y) growing from r0 to r1 pixels over `life` seconds as it fades.
+  ring(x, y, color, r0, r1, life, width) {
+    if (this.rings.length > 80) this.rings.shift();
+    this.rings.push({ x, y, color, r0, r1, life, max: life, width, dots: 0 });
+  }
+
+  // A crew member leaves: a puff of its colour, with a few sparks thrown out.
+  poof(x, y, color) {
+    this.ring(x, y, color, 10, 40, 0.32, 5);
+    this.rings[this.rings.length - 1].dots = 7;
   }
 
   get busy() { return this.shots.length > 0; }
@@ -44,6 +63,25 @@ export class Fx {
     const g = this.g;
     g.setTransform(this.dpr, 0, 0, this.dpr, 0, 0);
     g.clearRect(0, 0, this.w, this.h);
+    g.lineCap = 'round'; g.lineJoin = 'round';
+    for (let k = this.rings.length - 1; k >= 0; k--) {
+      const r = this.rings[k];
+      r.life -= dt;
+      if (r.life <= 0) { this.rings.splice(k, 1); continue; }
+      const e = Math.min(1, Math.max(0, 1 - r.life / r.max)), ease = 1 - (1 - e) ** 3;
+      const rad = r.r0 + (r.r1 - r.r0) * ease;
+      g.globalAlpha = (1 - e) * 0.9;
+      g.strokeStyle = r.color;
+      g.lineWidth = r.width * (1 - e * 0.6);
+      g.beginPath(); g.arc(r.x, r.y, rad, 0, Math.PI * 2); g.stroke();
+      if (r.dots) {
+        g.fillStyle = r.color;
+        for (let q = 0; q < r.dots; q++) {
+          const a = (q / r.dots) * Math.PI * 2 + 0.4;
+          g.beginPath(); g.arc(r.x + Math.cos(a) * rad * 1.25, r.y + Math.sin(a) * rad * 1.25, 3.5 * (1 - e), 0, Math.PI * 2); g.fill();
+        }
+      }
+    }
     for (let k = this.shots.length - 1; k >= 0; k--) {
       const s = this.shots[k];
       const p = s.progress();
@@ -55,18 +93,28 @@ export class Fx {
       const x = (1 - t) * (1 - t) * s.x0 + 2 * (1 - t) * t * mx + t * t * end.x;
       const y = (1 - t) * (1 - t) * s.y0 + 2 * (1 - t) * t * my + t * t * end.y;
       s.trail.push(x, y);
-      if (s.trail.length > 14) s.trail.splice(0, 2);
-      for (let q = 0; q < s.trail.length; q += 2) {
-        const a = q / s.trail.length;
-        g.globalAlpha = a * 0.6;
-        g.fillStyle = s.color;
-        g.beginPath(); g.arc(s.trail[q], s.trail[q + 1], 2 + a * 4, 0, Math.PI * 2); g.fill();
+      if (s.trail.length > TRAIL * 2) s.trail.splice(0, 2);
+      // The tail: thin and faint at its end, as wide as the shot at its head.
+      g.strokeStyle = s.color;
+      const n = s.trail.length / 2;
+      for (let q = 1; q < n; q++) {
+        const a = q / n;
+        g.globalAlpha = a * 0.7;
+        g.lineWidth = 1 + a * 7;
+        g.beginPath();
+        g.moveTo(s.trail[q * 2 - 2], s.trail[q * 2 - 1]);
+        g.lineTo(s.trail[q * 2], s.trail[q * 2 + 1]);
+        g.stroke();
       }
+      // A glow, then a white core with the colour inside.
+      g.globalAlpha = 0.28;
+      g.fillStyle = s.color;
+      g.beginPath(); g.arc(x, y, 11, 0, Math.PI * 2); g.fill();
       g.globalAlpha = 1;
       g.fillStyle = '#fff';
-      g.beginPath(); g.arc(x, y, 5.5, 0, Math.PI * 2); g.fill();
+      g.beginPath(); g.arc(x, y, 6, 0, Math.PI * 2); g.fill();
       g.fillStyle = s.color;
-      g.beginPath(); g.arc(x, y, 3.5, 0, Math.PI * 2); g.fill();
+      g.beginPath(); g.arc(x, y, 3.6, 0, Math.PI * 2); g.fill();
     }
     for (let k = this.confetti.length - 1; k >= 0; k--) {
       const c = this.confetti[k];
