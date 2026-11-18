@@ -113,6 +113,34 @@ const fillWithBuried = async (page: any, before: any[]) => {
   return false;
 };
 
+// Plays the level to its win with the careful rule; fails on a jam or another level starting.
+const winLevel = async (page: any, level: number) => {
+  const end = Date.now() + 150_000;
+  while (Date.now() < end) {
+    const b = await board(page);
+    if (b.s === "won") return;
+    if (b.level !== level) throw new Error(`level ${b.level + 1} started before level ${level + 1} was won`);
+    if (b.s === "jam") throw new Error(`level ${level + 1} ran out of room with a careful player`);
+    await page.waitForTimeout((await send(page, "can-hit")) ? 150 : 250);
+  }
+  throw new Error(`level ${level + 1} was not won in 150 seconds`);
+};
+
+// The win card: how many of its three stars are lit, and whether it says New best.
+const winCard = async (page: any, lit: number, best: boolean) => {
+  const w = await page.evaluate(() => {
+    const b = document.getElementById("banner")!;
+    return { on: b.querySelectorAll(".stars svg.on").length, all: b.querySelectorAll(".stars svg").length, best: !!b.querySelector(".best") };
+  });
+  if (w.all !== 3 || w.on !== lit || w.best !== best) throw new Error(`the win shows ${w.on} of ${w.all} stars lit and New best ${w.best}; expected ${lit} lit and New best ${best}`);
+};
+
+// The level's best stars in the top bar.
+const topStars = async (page: any, lit: number) => {
+  const t = await page.evaluate(() => ({ best: (window as any).crumble.stars, on: document.querySelectorAll("#star:not([hidden]) svg.on").length }));
+  if (t.best !== lit || t.on !== lit) throw new Error(`the top bar shows ${t.on} stars lit and the best is ${t.best}; expected ${lit}`);
+};
+
 export const journeys = [
   {
     name: "01-win",
@@ -204,6 +232,43 @@ export const journeys = [
         },
       },
       {
+        caption: "Tilt to look from below",
+        change: "From below",
+        highlight: true,
+        run: async (ctx: any) => {
+          const page = ctx.page;
+          const view = () => page.evaluate(() => (window as any).crumble.view);
+          const box = await page.locator("#gl").boundingBox();
+          const x = box.x + box.width / 2, y = box.y + box.height * 0.55;
+          await page.mouse.move(x, y);
+          await page.mouse.down();
+          // Up the screen tilts the camera down, past level with the turntable, to look up at it.
+          for (let k = 1; k <= 36; k++) {
+            await page.mouse.move(x + k * 2, y - k * 12);
+            await page.waitForTimeout(30);
+            if ((await view()).pitch < 30) break;
+          }
+          await page.waitForTimeout(300);
+          const held = await view();
+          if (held.pitch >= 45) throw new Error(`dragging up did not take the camera below the turntable (pitch ${held.pitch}; level is about 45)`);
+          // The frame is taken while held, from below; the next step lets go.
+        },
+      },
+      {
+        caption: "Let go: it turns again",
+        run: async (ctx: any) => {
+          const page = ctx.page;
+          await page.mouse.up();
+          const end = Date.now() + 20000;
+          for (;;) {
+            const v = await page.evaluate(() => (window as any).crumble.view);
+            if (v.spin > 0 && v.hand === "auto") break;
+            if (Date.now() > end) throw new Error(`the turntable did not turn on its own again after letting go (${JSON.stringify(v)})`);
+            await page.waitForTimeout(200);
+          }
+        },
+      },
+      {
         caption: "Crew on the pads",
         run: async (ctx: any) => {
           for (let k = 0; k < 3; k++) { await send(ctx.page, "can-hit"); await ctx.page.waitForTimeout(200); }
@@ -227,15 +292,27 @@ export const journeys = [
           throw new Error("level 1 was not won in 150 seconds");
         },
       },
-      { expect: "Clean clear", caption: "No undo: a clean clear" },
+      {
+        caption: "No undo: three stars, new best",
+        change: "Three stars",
+        highlight: true,
+        run: async (ctx: any) => {
+          const w = await ctx.page.evaluate(() => {
+            const b = document.getElementById("banner")!;
+            return { on: b.querySelectorAll(".stars svg.on").length, all: b.querySelectorAll(".stars svg").length, best: !!b.querySelector(".best") };
+          });
+          if (w.on !== 3 || w.all !== 3 || !w.best) throw new Error(`the win shows ${w.on} of ${w.all} stars lit, New best ${w.best}`);
+        },
+      },
+      { expect: "Clean clear", caption: "A clean clear" },
       { expect: "Level 2", caption: "Next level starts", highlight: true },
       { caption: "A whole duck", run: async (ctx: any) => { await whole(ctx.page, 1); } },
       { click: "#prev", caption: "Back to level 1" },
       {
-        caption: "Level 1 has its star",
+        caption: "Level 1 keeps three stars",
         run: async (ctx: any) => {
-          const s = await ctx.page.evaluate(() => ({ level: (window as any).crumble.level, clean: (window as any).crumble.clean, star: !document.getElementById("star")!.hidden }));
-          if (s.level !== 0 || !s.clean || !s.star) throw new Error(`level ${s.level + 1}: cleared clean ${s.clean}, star shown ${s.star}`);
+          const s = await ctx.page.evaluate(() => ({ level: (window as any).crumble.level, clean: (window as any).crumble.clean, stars: (window as any).crumble.stars, lit: document.querySelectorAll("#star:not([hidden]) svg.on").length }));
+          if (s.level !== 0 || !s.clean || s.stars !== 3 || s.lit !== 3) throw new Error(`level ${s.level + 1}: cleared clean ${s.clean}, best ${s.stars} stars, ${s.lit} lit in the top bar`);
         },
       },
       { click: "#next", caption: "On to the duck" },
@@ -475,6 +552,43 @@ export const journeys = [
           if (back.now.undos !== was.before.undos + 1) throw new Error("the undo was not counted");
         },
       },
+    ],
+  },
+  {
+    name: "04-stars",
+    description: "Win level 1 after one undo for two stars and a new best, then replay it clean for three.",
+    tag: "Stars",
+    intro: "Maya takes one send back and wins with two stars, then replays for all three.",
+    steps: [
+      { goto: "/voxel-pop/?level=1", caption: "Level 1" },
+      { expect: "Tap the front crew", caption: "What to do" },
+      {
+        caption: "One send, then undo",
+        run: async (ctx: any) => {
+          const before = await board(ctx.page);
+          if (!(await send(ctx.page, "can-hit"))) throw new Error("no crew member could be sent at the start of level 1");
+          await ctx.page.waitForTimeout(120);
+          await ctx.page.locator("#undo").click({ timeout: 5000 });
+          await ctx.page.waitForTimeout(500);
+          const after = await board(ctx.page);
+          if (after.onPads !== 0 || after.crew !== before.crew) throw new Error(`undo did not bring the crew member back (${after.onPads} on the pads, ${after.crew} of ${before.crew} crew in the lines)`);
+        },
+      },
+      { caption: "Play it through", run: async (ctx: any) => { await winLevel(ctx.page, 0); } },
+      {
+        caption: "One undo: two stars, new best",
+        change: "Two stars",
+        highlight: true,
+        run: async (ctx: any) => { await winCard(ctx.page, 2, true); },
+      },
+      { expect: "Level 2", caption: "Next level starts" },
+      { click: "#prev", caption: "Back to level 1" },
+      { caption: "Two stars in the top bar", run: async (ctx: any) => { await topStars(ctx.page, 2); } },
+      { caption: "Replay with no undo", run: async (ctx: any) => { await winLevel(ctx.page, 0); } },
+      { caption: "Three stars, a new best", run: async (ctx: any) => { await winCard(ctx.page, 3, true); } },
+      { expect: "Level 2", caption: "Next level starts" },
+      { click: "#prev", caption: "Back to level 1" },
+      { caption: "The best stays three", run: async (ctx: any) => { await topStars(ctx.page, 3); } },
     ],
   },
 ];
