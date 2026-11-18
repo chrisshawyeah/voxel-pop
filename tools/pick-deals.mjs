@@ -42,6 +42,10 @@ const only = args.find(a => /^\d+$/.test(a));
 const list = args.includes('--list');
 // --set='{"crew":[40,70],"cols":4}' tries other settings for the level(s) without editing the file.
 const set = JSON.parse((args.find(a => a.startsWith('--set=')) || '--set={}').slice(6));
+// --assume='{"16":{"fc":38,"undos":4}}' compares with those measures for the levels named (by number)
+// instead of measuring them as stored, so levels whose neighbours are being re-picked at the same
+// time can be picked side by side against the values planned for them.
+const assume = JSON.parse((args.find(a => a.startsWith('--assume=')) || '--assume={}').slice(9));
 
 const MIXES = [0, 0.1, 0.2, 0.3, 0.45, 0.6];
 const FLIPS = [0, 0.2, 0.4, 0.5, 0.6, 0.8];
@@ -59,6 +63,7 @@ function pick(n) {
   const m = [];
   for (let k = n - 2; k <= n + 2; k++) {
     if (k < 0 || k >= LEVELS.length || k === n) continue;
+    if (assume[k + 1]) { m[k] = assume[k + 1]; continue; }
     const b = buildLevel(k).board;
     m[k] = { fc: forecastCheck(b).rate, undos: backtrackCheck(b).undos };
   }
