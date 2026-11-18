@@ -36,12 +36,18 @@ const args = process.argv.slice(2);
 const write = args.includes('--write');
 const json = args.includes('--json');
 const tries = Number((args.find(a => a.startsWith('--tries=')) || '--tries=40').slice(8));
+// --from=40 starts at deal 40 instead of 0, so one level's search can be split across processes.
+const from = Number((args.find(a => a.startsWith('--from=')) || '--from=0').slice(7));
 const only = args.find(a => /^\d+$/.test(a));
 // --list prints every deal that passes the planning player and the greedy band, with its measures,
 // instead of stopping at the first that passes everything (to choose by hand).
 const list = args.includes('--list');
 // --set='{"crew":[40,70],"cols":4}' tries other settings for the level(s) without editing the file.
 const set = JSON.parse((args.find(a => a.startsWith('--set=')) || '--set={}').slice(6));
+// --assume='{"16":{"fc":38,"undos":4}}' compares with those measures for the levels named (by number)
+// instead of measuring them as stored, so levels whose neighbours are being re-picked at the same
+// time can be picked side by side against the values planned for them.
+const assume = JSON.parse((args.find(a => a.startsWith('--assume=')) || '--assume={}').slice(9));
 
 const MIXES = [0, 0.1, 0.2, 0.3, 0.45, 0.6];
 const FLIPS = [0, 0.2, 0.4, 0.5, 0.6, 0.8];
@@ -59,6 +65,7 @@ function pick(n) {
   const m = [];
   for (let k = n - 2; k <= n + 2; k++) {
     if (k < 0 || k >= LEVELS.length || k === n) continue;
+    if (assume[k + 1]) { m[k] = assume[k + 1]; continue; }
     const b = buildLevel(k).board;
     m[k] = { fc: forecastCheck(b).rate, undos: backtrackCheck(b).undos };
   }
@@ -76,7 +83,7 @@ function pick(n) {
   const t0 = Date.now();
   const done = found => ({ n, ...found, ms: Date.now() - t0 });
   for (const { mix, flip } of grid) {
-    for (let deal = 0; deal < tries; deal++) {
+    for (let deal = from; deal < from + tries; deal++) {
       const def = { ...def0, mix, flip, deal };
       const L = dealLevel(def);
       if (L.shooters > 30) { big++; continue; } // crew sizes change with the deal: another may fit

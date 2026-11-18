@@ -17,6 +17,7 @@ const SOUND_KEY = 'crumble-crew.sound';            // '0' when the player turned
 const DONE_KEY = 'crumble-crew.all-cleared';       // how many times every level has been cleared
 const CLEARED_KEY = 'crumble-crew.cleared-levels'; // which levels have been won since then, one bit each
 const CLEAN_KEY = 'crumble-crew.clean-levels';     // which levels have been won with no undo, one bit each
+const STARS_KEY = 'crumble-crew.stars';            // the most stars each level has been won with, one digit a level
 const ATTEMPT_KEY = n => `crumble-crew.attempt.${n + 1}`; // level n half-played, by its number on screen
 const OLD_ATTEMPT_KEY = 'crumble-crew.attempt';    // the one attempt the game kept before, for any level
 const TAUGHT_KEY = 'crumble-crew.taught';          // the lessons seen, one bit each (SENT, PARK, TICK below)
@@ -25,7 +26,7 @@ const FIRE_GAP = 1 / 30;  // seconds per tick of the rules: each pad sends at mo
                           // shot lands R.FLIGHT ticks after it leaves (js/logic.js). R.pace() says when
                           // the ticks run R.FAST times as fast.
 const LAND = 5;           // ticks (about 167 ms) a crew member takes to land on its pad before its first shot
-const NEXT_AFTER = 1700;  // milliseconds of confetti before the next level starts
+const NEXT_AFTER = 2400;  // milliseconds of confetti and stars before the next level starts
 const HOLD_MS = 300;      // a touch held this long on a front shows what sending it would do, and sends nobody
 const RETRY_MS = 60000;   // a reload that came back as the old version is tried again after this long
 const LAST = LEVELS.length - 1;
@@ -72,6 +73,13 @@ let speed = 1;               // 1, or R.FAST (R.pace in js/logic.js)
 const pressed = new Set();   // the pointers down now: while one is, the ticks run at 1x (R.pace)
 let clearedMask = Number(store.get(CLEARED_KEY)) || 0; // kept here too, so a visit with storage blocked still counts
 let cleanMask = Number(store.get(CLEAN_KEY)) || 0;
+// Stars: a level won with no undo earns three, with one or two undos two, with more one. The most
+// each level has earned is kept; a level cleared clean before stars came keeps its three.
+const starsFor = undos => (undos === 0 ? 3 : undos <= 2 ? 2 : 1);
+const bestStars = String(store.get(STARS_KEY) || '').padEnd(LEVELS.length, '0').slice(0, LEVELS.length).split('').map(d => Math.min(3, Number(d) || 0));
+LEVELS.forEach((_, n) => { if (cleanMask & bit(n)) bestStars[n] = 3; });
+const STAR_SVG = '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="m12 2.8 2.7 5.6 6.1.8-4.5 4.2 1.1 6.1L12 16.6l-5.4 2.9 1.1-6.1-4.5-4.2 6.1-.8z"/></svg>';
+const starRow = n => [1, 2, 3].map(k => STAR_SVG.replace('<svg', `<svg class="${k <= n ? 'on' : 'off'}"`)).join('');
 let allCleared = Number(store.get(DONE_KEY)) || 0;
 const clearedColours = new Set();
 const leavers = new Set();   // crew that have sent their last shot, drawn leaving over a pad that is already free
@@ -170,9 +178,11 @@ function start(n, fresh = false) {
 
 // One small star beside the level's name once it has been cleared clean (won with no undo).
 function showStar() {
-  const clean = !!(cleanMask & bit(current));
-  $('star').hidden = !clean;
-  $('again').setAttribute('aria-label', `Restart level ${current + 1}, ${LEVELS[current].name}${clean ? ', cleared clean' : ''}`);
+  const best = bestStars[current];
+  const el = $('star');
+  el.hidden = !best;
+  if (el._n !== best) { el._n = best; el.innerHTML = starRow(best); }
+  $('again').setAttribute('aria-label', `Restart level ${current + 1}, ${LEVELS[current].name}${best ? `, best ${best} star${best > 1 ? 's' : ''}` : ''}`);
 }
 
 // Draws the attempt's board from scratch: at a level start, after an undo, after a restore.
@@ -808,12 +818,15 @@ function win() {
   forgetAttempt(current);
   clearedMask |= bit(current);
   store.set(CLEARED_KEY, clearedMask);
-  if (clean) { cleanMask |= bit(current); store.set(CLEAN_KEY, cleanMask); showStar(); }
+  if (clean) { cleanMask |= bit(current); store.set(CLEAN_KEY, cleanMask); }
+  const stars = starsFor(att.undos), newBest = stars > bestStars[current];
+  if (newBest) { bestStars[current] = stars; store.set(STARS_KEY, bestStars.join('')); }
+  showStar();
   stage.finale(); fx.party(); buzz.tick(0);
   if (current === LAST || (clearedMask & ALL) === ALL) return ending();
   store.set(SAVE_KEY, current + 1); // a page stopped during the confetti comes back on the next level
   sound.win();
-  say(`${LEVELS[current].name} popped!${clean ? ' Clean clear' : ''}`, 0);
+  sayWon(`${LEVELS[current].name} popped!${clean ? ' Clean clear' : ''}`, stars, newBest);
   const g = gen;
   setTimeout(() => { if (g === gen) start(current + 1); }, NEXT_AFTER);
 }
@@ -906,9 +919,23 @@ function frame(now) {
   requestAnimationFrame(frame);
 }
 
+// The win: its words, then its stars popping in one by one, and "New best" when it beat the level's
+// best so far.
+function sayWon(text, stars, newBest) {
+  const b = $('banner');
+  clearTimeout(bannerTimer);
+  b.innerHTML = `<span class="won"></span><span class="stars">${starRow(stars)}</span>${newBest ? '<b class="best">New best</b>' : ''}`;
+  b.firstChild.textContent = text;
+  b.setAttribute('aria-label', `${text}. ${stars} star${stars > 1 ? 's' : ''}${newBest ? ', a new best' : ''}`);
+  b.classList.add('win');
+  b.hidden = false;
+  for (let k = 0; k < stars; k++) sound.star(k);
+}
+
 function say(text, ms) {
   const b = $('banner');
   clearTimeout(bannerTimer);
+  b.classList.remove('win'); b.removeAttribute('aria-label');
   if (!text) { b.hidden = true; return; }
   b.textContent = text;
   b.hidden = false;
@@ -980,6 +1007,7 @@ const TURN_PX = 0.011;  // radians of turn per pixel dragged sideways
 const TILT_PX = 0.007;  // radians of tilt per pixel dragged up or down
 const FLING = 2.4;      // the fastest turn a flick leaves, radians a second
 const REST = 0.9;       // seconds the sculpture stays still after a drag before turning on its own
+const YAW_FOLLOW = 8;   // turntable steps (0.7 degrees) the hand moves before the board takes the new view
 const look = { yaw: R.yawRad(R.START_YAW), pitch: R.pitchRad(R.START_PITCH), hand: 'auto', vy: 0, vp: 0, rest: 0 };
 const wrapPi = a => a - 2 * Math.PI * Math.round(a / (2 * Math.PI));
 const tilted = p => Math.max(R.PITCH_MIN, Math.min(R.PITCH_MAX, p));
@@ -994,8 +1022,11 @@ function viewBeforeTick() {
     if (st.tick % 2 === 0) att.view(st.yaw, st.pitch, st.spin + 1);
     return;
   }
+  // Held, the rules look from exactly where the sculpture stands, so the board follows the hand to
+  // within YAW_FOLLOW steps (under a degree), not every step, to keep the saved views few.
   const y = R.yawUnits(look.yaw), p = R.pitchUnits(look.pitch);
-  if (st.spin || p !== st.pitch || Math.floor(y / R.VIEW_STEP) !== Math.floor(st.yaw / R.VIEW_STEP)) att.view(y, p, 0);
+  const dy = Math.abs(((y - st.yaw + R.YAW_STEPS / 2) % R.YAW_STEPS + R.YAW_STEPS) % R.YAW_STEPS - R.YAW_STEPS / 2);
+  if (st.spin || p !== st.pitch || dy >= YAW_FOLLOW) att.view(y, p, 0);
 }
 
 // The board takes exactly the view on the screen (an undo's board is from before the send).
@@ -1128,7 +1159,7 @@ window.crumble = {
   get state() { return state; }, get board() { return st; }, get level() { return current; },
   get allCleared() { return allCleared; },
   get sends() { return att.sends.length; }, get undos() { return att.undos; },
-  get clean() { return !!(cleanMask & bit(current)); }, get speed() { return speed; },
+  get clean() { return !!(cleanMask & bit(current)); }, get stars() { return bestStars[current]; }, get speed() { return speed; },
   get drawn() { return { shots: fx.shots.length, cubes: stage.shown }; },
   get view() { return { yaw: st.yaw, pitch: st.pitch, spin: st.spin, hand: look.hand, shown: [look.yaw, look.pitch] }; },
   snapshot,

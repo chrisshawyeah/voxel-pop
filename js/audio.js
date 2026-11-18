@@ -69,6 +69,7 @@ export class Sound {
 
   send() { this.tone(330, 0.12, { vol: 0.25, slide: 1.8 }); }
   done() { this.tone(784, 0.1, { vol: 0.16 }); this.tone(1046, 0.14, { vol: 0.14, delay: 0.07 }); }
+  star(k) { this.tone([988, 1175, 1568][k] || 1568, 0.12, { vol: 0.14, delay: 0.25 + k * 0.25 }); }
   clear() { [659, 880, 1175, 1568].forEach((f, i) => this.tone(f, 0.16, { type: 'triangle', vol: 0.17, delay: i * 0.06 })); }
   reveal() { [1318, 1568, 2093].forEach((f, i) => this.tone(f, 0.09, { vol: 0.08, delay: i * 0.05 })); }
   nope() { this.tone(220, 0.12, { type: 'square', vol: 0.06 }); }
