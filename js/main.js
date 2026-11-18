@@ -980,6 +980,7 @@ const TURN_PX = 0.011;  // radians of turn per pixel dragged sideways
 const TILT_PX = 0.007;  // radians of tilt per pixel dragged up or down
 const FLING = 2.4;      // the fastest turn a flick leaves, radians a second
 const REST = 0.9;       // seconds the sculpture stays still after a drag before turning on its own
+const YAW_FOLLOW = 8;   // turntable steps (0.7 degrees) the hand moves before the board takes the new view
 const look = { yaw: R.yawRad(R.START_YAW), pitch: R.pitchRad(R.START_PITCH), hand: 'auto', vy: 0, vp: 0, rest: 0 };
 const wrapPi = a => a - 2 * Math.PI * Math.round(a / (2 * Math.PI));
 const tilted = p => Math.max(R.PITCH_MIN, Math.min(R.PITCH_MAX, p));
@@ -994,8 +995,11 @@ function viewBeforeTick() {
     if (st.tick % 2 === 0) att.view(st.yaw, st.pitch, st.spin + 1);
     return;
   }
+  // Held, the rules look from exactly where the sculpture stands, so the board follows the hand to
+  // within YAW_FOLLOW steps (under a degree), not every step, to keep the saved views few.
   const y = R.yawUnits(look.yaw), p = R.pitchUnits(look.pitch);
-  if (st.spin || p !== st.pitch || Math.floor(y / R.VIEW_STEP) !== Math.floor(st.yaw / R.VIEW_STEP)) att.view(y, p, 0);
+  const dy = Math.abs(((y - st.yaw + R.YAW_STEPS / 2) % R.YAW_STEPS + R.YAW_STEPS) % R.YAW_STEPS - R.YAW_STEPS / 2);
+  if (st.spin || p !== st.pitch || dy >= YAW_FOLLOW) att.view(y, p, 0);
 }
 
 // The board takes exactly the view on the screen (an undo's board is from before the send).

@@ -4,7 +4,7 @@ import { readFileSync } from 'node:fs';
 import { spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import { makeBoard, cloneBoard, removeCube, deploy, fire, step, settle, launch, target, isJammed, isWon, canFire, canReach, purgeCleared, isExposed, freeSlot, FLIGHT, tickGame, advance, forecast, forecastKey, fates, busy, revealLone, checkOf, pace, Attempt, FAST,
-  setView, clearView, viewMask, YAW_STEPS, START_YAW, START_PITCH, PITCH_STEPS, TURN, SEEK, LOOK, STALL, SIDE_NAMES } from '../js/logic.js';
+  setView, seen, pitchUnits, pitchRad, YAW_STEPS, START_YAW, START_PITCH, PITCH_STEPS, TURN, SEEK, LOOK, STALL } from '../js/logic.js';
 import { LEVELS, buildLevel, dealLevel, levelPrint, rng } from '../js/levels.js';
 import { plan, greedy, greedyCheck, hastyCheck, hastyGreedy, lineHolds, playLine, onClock, earlyParks, forecastFirst, backtrack, forecastCheck, hastyForecastCheck, backtrackCheck, firingTime, curveMisses, GAPS, LAND, GREEDY_PLAYS, PARK_MIN } from '../tools/players.mjs';
 
@@ -38,7 +38,7 @@ const readyLine = (st, k = 0) => {
   return behind >= 0 ? behind : st.columns.findIndex(c => c.length);
 };
 
-test('a cube is in sight while it is the first cube along a straight line in from a side or the top', () => {
+test('a cube is on the outside while one of its faces touches the outside air', () => {
   const m = solid(3);
   const st = makeBoard(m);
   assert.equal(st.exposed[0].size, 25, 'every cube of a 3x3x3 block but the middle one and the one under it');
@@ -50,10 +50,8 @@ test('a cube is in sight while it is the first cube along a straight line in fro
   assert.equal(st.exposed[0].has(at(m, 1, 1, 1)), true, 'taking a cube from the side opens the one behind it');
   assert.equal(isExposed(st, at(m, 1, 0, 1)), false, 'but not the one under that');
   removeCube(st, at(m, 1, 1, 1));
-  assert.equal(isExposed(st, at(m, 1, 0, 1)), false, 'a tunnel in from the side does not show the floor at its end: no straight line from outside reaches it');
-  assert.equal(st.side[at(m, 1, 1, 2)] & (1 << SIDE_NAMES.indexOf('back')), 1 << SIDE_NAMES.indexOf('back'), 'the cube at the end of the tunnel is in sight along it, from the back');
-  removeCube(st, at(m, 1, 2, 1));
-  assert.equal(isExposed(st, at(m, 1, 0, 1)), true, 'opened from above, it is in sight from the top');
+  assert.equal(st.exposed[0].has(at(m, 1, 0, 1)), true);
+  assert.equal(st.exposed[0].size, 25);
 });
 
 test('a cube sealed inside cannot be hit, and can be the moment a cube beside it goes', () => {
@@ -69,7 +67,7 @@ test('a cube sealed inside cannot be hit, and can be the moment a cube beside it
   assert.deepEqual([...st.exposed[1]], [CORE], 'so it does when the lid goes');
 });
 
-test('a hollow opened from above shows only what is straight down it', () => {
+test('air sealed inside a hollow does not open its walls until the hollow is opened', () => {
   // A 5x5x5 red block with an empty cell in the middle, walled in green on its six sides.
   const m = solid(5);
   const walls = [[1, 2, 2], [3, 2, 2], [2, 1, 2], [2, 3, 2], [2, 2, 1], [2, 2, 3]];
@@ -80,7 +78,7 @@ test('a hollow opened from above shows only what is straight down it', () => {
   removeCube(st, at(m, 2, 4, 2));
   assert.deepEqual([...st.exposed[1]], [at(m, 2, 3, 2)], 'the top wall opens from above; the rest still face sealed air');
   removeCube(st, at(m, 2, 3, 2));
-  assert.deepEqual([...st.exposed[1]], [at(m, 2, 1, 2)], 'down the shaft the floor of the hollow is in sight; its side walls face no straight line out');
+  assert.deepEqual([...st.exposed[1]].sort((a, b) => a - b), walls.filter(([, y]) => y !== 3).map(([x, y, z]) => at(m, x, y, z)).sort((a, b) => a - b), 'breaking in lets the air in: every wall left opens at once');
   assert.equal(isExposed(st, at(m, 2, 0, 2)), false, 'and not the cube under the floor');
   removeCube(st, at(m, 2, 1, 2));
   assert.equal(isExposed(st, at(m, 2, 0, 2)), true, 'until the floor goes');
@@ -99,7 +97,6 @@ test('a shot takes its cube when it leaves, and opens what is behind it only whe
     assert.equal(isJammed(st), false, 'a shot in the air is not a jam');
     assert.equal(isWon(st), false);
   }
-  assert.ok(st.slots[0] && st.slots[0].count > 0, 'red has shots left for the sides facing away from the camera');
   const land = step(st);
   assert.deepEqual(land.landed, [LID]);
   assert.ok(land.shots.some(s => s.cell === CORE && s.slot === 1), 'green opens when the lid lands, and fires the same tick');
@@ -185,11 +182,10 @@ test('crew hit only cubes on a side facing the camera; the turntable brings the 
   const m = backOnly();
   const st = makeBoard(m);
   const green = at(m, 1, 0, 0);
-  assert.equal(st.side[green], 1 << SIDE_NAMES.indexOf('back'), 'the green cube is in sight from the back only');
-  assert.equal(canReach(st, 0) || true, true);
+  assert.equal(isExposed(st, green), true, 'the green cube is on the outside, at the back');
   st.slots = [crew(0, 1, 1)];
   assert.equal(target(st, 1), -1, 'the back faces away from the camera at the start: green waits');
-  assert.equal(canReach(st, 0), true, 'yet it is not stuck: its cube is in sight from a side');
+  assert.equal(canReach(st, 0), true, 'yet it is not stuck: its cube is on the outside');
   assert.equal(isJammed(st), false);
   assert.ok(setView(st, (START_YAW + YAW_STEPS / 2) % YAW_STEPS, START_PITCH, 0), 'turned half round, the back faces the camera');
   assert.equal(target(st, 1), green);
@@ -203,12 +199,41 @@ test('crew hit only cubes on a side facing the camera; the turntable brings the 
 
 test('a cube hidden from the camera by a part of the sculpture is not hit; tilting up shows it', () => {
   const st = makeBoard(pit());
-  assert.ok(st.side[PIT] & (1 << SIDE_NAMES.indexOf('top')), 'the green floor is in sight from the top');
-  assert.equal(clearView(st, PIT, viewMask(st)), false, 'but from the camera low down the pit walls hide it');
+  assert.equal(isExposed(st, PIT), true, 'the green floor is on the outside');
+  assert.equal(seen(st, PIT), false, 'but from the camera low down the pit walls hide it');
   assert.equal(target(st, 1), -1, 'so green waits');
   setView(st, START_YAW, PITCH_STEPS - 1, 0);
-  assert.equal(clearView(st, PIT, viewMask(st)), true, 'looking down from high up it is in view');
+  assert.equal(seen(st, PIT), true, 'looking down from high up it is in view');
   assert.equal(target(st, 1), PIT);
+});
+
+test('a cube seen at a slant into a notch can be hit, though no straight line of the grid reaches it', () => {
+  // A red slab with a green cube in a notch: a red lid on top of it, red on its left, right and
+  // back, and in front a gap with another red cube beyond it.
+  const cubes = [];
+  for (let x = 0; x < 3; x++) for (let z = 0; z < 4; z++) if (!(x === 1 && z === 2)) cubes.push([x, 0, z, x === 1 && z === 1 ? 2 : 1]);
+  cubes.push([1, 1, 1, 1]);
+  const m = grid(3, 2, 4, cubes);
+  const st = makeBoard(m);
+  const green = at(m, 1, 0, 1);
+  assert.equal(isExposed(st, green), true, 'its front face touches the air in the gap');
+  setView(st, 0, pitchUnits(0.9), 0); // looking at the front, from well above
+  assert.equal(seen(st, green), true, 'the camera sees into the gap');
+  st.slots = [crew(0, 1, 1)];
+  assert.equal(target(st, 1), green, 'so green fires at it');
+  setView(st, YAW_STEPS / 2, pitchUnits(0.9), 0); // from the back
+  assert.equal(seen(st, green), false, 'from the back the slab hides it');
+});
+
+test('the camera can look from below and from almost straight above; from below the turntable hides what stands on it', () => {
+  assert.ok(pitchRad(0) < -1 && pitchRad(PITCH_STEPS - 1) > 1.4, 'from well below level to almost straight down');
+  const st = makeBoard(stack(1));
+  setView(st, 0, pitchUnits(0.2), 0);
+  assert.equal(seen(st, 0), true, 'a cube on the turntable, from the side');
+  setView(st, 0, pitchUnits(-1), 0);
+  assert.equal(seen(st, 0), false, 'from below, the turntable is in the way');
+  setView(st, 0, pitchUnits(1.45), 0);
+  assert.equal(seen(st, 0), true, 'from almost straight above, its top');
 });
 
 test('crew who wait with nothing in view make the camera look higher, then lower; held still they hit a hidden cube in the end', () => {
@@ -220,6 +245,7 @@ test('crew who wait with nothing in view make the camera look higher, then lower
   assert.ok(shotAt > SEEK && shotAt < SEEK + LOOK, `the camera looked higher and green fired at tick ${shotAt}`);
   assert.ok(a.pitch > START_PITCH);
   settle(a);
+  for (let k = 0; k < 200; k++) step(a); // the camera glides back a few steps at a time
   assert.equal(a.pitch, a.home, 'once something flies the camera goes back to where it was');
   // Held still by the player, nothing moves the camera: after STALL ticks green takes the hidden cube.
   const b = makeBoard(pit());
