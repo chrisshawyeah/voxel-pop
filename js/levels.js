@@ -49,13 +49,13 @@ export const LEVELS = [
   { name: 'Rocket', model: 'rocket', cols: 5, pads: 4, crew: [30, 50], hidden: 2, mix: 0.1, flip: 0.8, greedy: [40, 70], follow: [52, 65], undos: 3, deal: 36 },
   { name: 'Snowman', model: 'snowman', cols: 5, pads: 4, crew: [50, 80], hidden: 2, mix: 0, flip: 0.6, greedy: [40, 70], follow: [50, 62], undos: 3, deal: 15 },
   { name: 'Cupcake', model: 'cupcake', cols: 5, pads: 3, crew: [40, 60], hidden: 2, mix: 0.1, flip: 0.6, greedy: [40, 70], follow: [47, 58], undos: 4, deal: 5 },
-  { name: 'Tree', model: 'tree', cols: 3, pads: 3, crew: [30, 50], hidden: 2, mix: 0.1, flip: 0.6, greedy: [40, 70], follow: [35, 55], undos: 4, deal: 36 },
+  { name: 'Tree', model: 'tree', cols: 3, pads: 3, crew: [30, 50], hidden: 2, mix: 0.2, flip: 0.6, greedy: [40, 70], follow: [30, 55], undos: 4, deal: 2 },
   { name: 'House', model: 'house', cols: 3, pads: 4, crew: [50, 80], hidden: 2, mix: 0.3, flip: 0.8, greedy: [15, 45], follow: [36, 45], undos: 5, deal: 37 },
-  { name: 'Nesting Dolls', model: 'dolls', cols: 4, pads: 5, crew: [50, 80], hidden: 2, mix: 0.1, flip: 0.8, greedy: [15, 45], follow: [33, 45], undos: 5, deal: 7 },
+  { name: 'Nesting Dolls', model: 'dolls', cols: 4, pads: 5, crew: [50, 80], hidden: 2, mix: 0.1, flip: 0.8, greedy: [15, 45], follow: [33, 45], undos: 5, deal: 100 },
   { name: 'Melon', model: 'melon', cols: 3, pads: 5, crew: [30, 50], hidden: 1, mix: 0.2, flip: 0.8, greedy: [70, 85], follow: [60, 80], undos: 2, deal: 1 },
-  { name: 'Castle', model: 'castle', cols: 4, pads: 3, crew: [60, 100], hidden: 3, mix: 0, flip: 0.6, greedy: [15, 45], follow: [24, 40], undos: 6, deal: 19 },
+  { name: 'Castle', model: 'castle', cols: 3, pads: 3, crew: [60, 100], hidden: 3, mix: 0.3, flip: 0.8, greedy: [15, 45], follow: [24, 40], undos: 6, deal: 49 },
   { name: 'Patchwork', model: 'patchwork', cols: 4, pads: 3, crew: [30, 50], hidden: 2, mix: 0.1, flip: 0.6, greedy: [15, 45], follow: [21, 36], undos: 6, deal: 5 },
-  { name: 'Ringed Planet', model: 'planet', cols: 4, pads: 3, crew: [60, 100], hidden: 3, mix: 0.1, flip: 0.6, greedy: [15, 45], follow: [25, 38], undos: 6, deal: 24 },
+  { name: 'Ringed Planet', model: 'planet', cols: 4, pads: 3, crew: [60, 100], hidden: 3, mix: 0.1, flip: 0.8, greedy: [15, 45], follow: [25, 38], undos: 6, deal: 5 },
 ];
 
 export const padsFor = def => def.pads || START_SLOTS;

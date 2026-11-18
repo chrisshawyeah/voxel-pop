@@ -45,6 +45,10 @@ export class Stage {
     const rim = new THREE.DirectionalLight('#bcd8ff', 0.9);
     rim.position.set(-8, 4, -6);
     this.scene.add(rim);
+    // A soft light from below, so the turntable's underside reads as white when the camera looks up at it.
+    const under = new THREE.DirectionalLight('#ffffff', 0.9);
+    under.position.set(2, -10, 3);
+    this.scene.add(under);
 
     this.spin = new THREE.Group();
     this.scene.add(this.spin);

@@ -2,12 +2,13 @@
 
 A cube-popping puzzle. A sculpture made of coloured cubes turns in the middle. Tap the front
 crew member of a line to send it up to a launch pad, where it pops cubes of its colour until
-its number runs out. A crew member hits only cubes you can see: a cube on the outside of the
-sculpture (nothing between it and the outside along a straight line in from the front, back,
-left, right or top; never from below), on a side that faces the camera now, with nothing in the
-way between it and the camera. The cubes stand flush, so nothing behind them shows through. The
-sculpture turns on its turntable, so its sides come round in turn; drag it to turn it yourself,
-and drag up or down to tilt the camera. Crew who have waited a while with nothing of theirs in
+its number runs out. A crew member hits only cubes you can see: a cube with a face on the open
+air around the sculpture, turned to the camera, with nothing of the sculpture or the turntable
+between some part of that face and the camera, whether straight on, at a slant into a notch, under
+a part that sticks out, or from below. The cubes stand flush, so nothing behind them shows
+through. The sculpture turns on its turntable, so its sides come round in turn; drag it to turn it
+yourself, and drag up or down to tilt the camera, from below the turntable to almost straight
+down. Crew who have waited a while with nothing of theirs in
 view make the camera look higher, then lower (into a pit, under a part that sticks out); only
 after about 17 seconds of that may a shot take a cube out of sight. So the sculpture is eaten
 from the outside in, and the puzzle is in its layers: a colour hidden inside comes out only as
@@ -113,7 +114,8 @@ Play: https://chrisshawyeah.github.io/voxel-pop/
   reload comes back to the level being played. A number that is not a whole level from 1 to 20 is
   rounded and kept inside that range; when the browser blocks storage the game plays on and the
   address follows the level being played instead.
-- Drag the sculpture sideways to turn it, up or down to tilt the camera. A flick keeps turning a
+- Drag the sculpture sideways to turn it all the way round, up or down to tilt the camera from below
+  it to almost straight above. A flick keeps turning a
   little; the turntable stays still for a moment after you let go, then takes up its own turn
   again. While you hold it the crew aim at what you see, and a saved attempt keeps every turn, so
   it comes back to the same cubes.
