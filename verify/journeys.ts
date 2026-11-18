@@ -228,14 +228,26 @@ export const journeys = [
         },
       },
       { expect: "Clean clear", caption: "No undo: a clean clear" },
+      {
+        caption: "Three stars, a new best",
+        change: "Three stars",
+        highlight: true,
+        run: async (ctx: any) => {
+          const w = await ctx.page.evaluate(() => {
+            const b = document.getElementById("banner")!;
+            return { on: b.querySelectorAll(".stars svg.on").length, all: b.querySelectorAll(".stars svg").length, best: !!b.querySelector(".best") };
+          });
+          if (w.on !== 3 || w.all !== 3 || !w.best) throw new Error(`the win shows ${w.on} of ${w.all} stars lit, New best ${w.best}`);
+        },
+      },
       { expect: "Level 2", caption: "Next level starts", highlight: true },
       { caption: "A whole duck", run: async (ctx: any) => { await whole(ctx.page, 1); } },
       { click: "#prev", caption: "Back to level 1" },
       {
-        caption: "Level 1 has its star",
+        caption: "Level 1 keeps three stars",
         run: async (ctx: any) => {
-          const s = await ctx.page.evaluate(() => ({ level: (window as any).crumble.level, clean: (window as any).crumble.clean, star: !document.getElementById("star")!.hidden }));
-          if (s.level !== 0 || !s.clean || !s.star) throw new Error(`level ${s.level + 1}: cleared clean ${s.clean}, star shown ${s.star}`);
+          const s = await ctx.page.evaluate(() => ({ level: (window as any).crumble.level, clean: (window as any).crumble.clean, stars: (window as any).crumble.stars, lit: document.querySelectorAll("#star:not([hidden]) svg.on").length }));
+          if (s.level !== 0 || !s.clean || s.stars !== 3 || s.lit !== 3) throw new Error(`level ${s.level + 1}: cleared clean ${s.clean}, best ${s.stars} stars, ${s.lit} lit in the top bar`);
         },
       },
       { click: "#next", caption: "On to the duck" },
