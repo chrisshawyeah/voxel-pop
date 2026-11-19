@@ -3,10 +3,11 @@
 // The crew hit only cubes the player can see. A cube is on the outside while one of its faces
 // touches the outside air (the turntable under the sculpture is not air, and nor is air sealed in
 // a hollow until a cube between it and the outside goes). It can be hit while such a face is
-// turned to the camera and some part of that face has a clear straight line to the camera,
-// nothing of the sculpture or the turntable in between: what the player sees, from wherever the
-// camera looks, the top, the sides, at a slant into a notch, or from below. So the crew eat the
-// sculpture from the outside in, and a colour hidden inside waits until the cubes covering it go.
+// turned well towards the camera and a fair part of that face has a clear straight line to the
+// camera, nothing of the sculpture or the turntable in between: what the player sees, from
+// wherever the camera looks, the top, the sides, at a slant into a notch, or from below. So the
+// crew eat the sculpture from the outside in, and a colour hidden inside waits until the cubes
+// covering it go. A cube the camera cannot see is never hit, however long the crew wait.
 //
 // The view is part of the board: st.yaw (how far the turntable has turned, YAW_STEPS to a turn),
 // st.pitch (how high the camera looks from, PITCH_STEPS from low to high) and st.spin (how far the
@@ -30,7 +31,7 @@ export const FAST = 3;        // how much faster the ticks run while there is no
 // Which version of these rules a saved attempt was played under (js/main.js keeps it with the
 // save). Add one whenever a change here makes the same sends end on a different board, so a level
 // left half-played under the old rules starts again instead of coming back wrong.
-export const RULES = 6;
+export const RULES = 7;
 // The view (see the top of this file). A turn of the turntable is YAW_STEPS steps; on its own it
 // turns TURN steps a tick (about 0.41 radians a second, a turn in 15 seconds at normal speed). The
 // camera looks from PITCH_MIN to PITCH_MAX radians above level in PITCH_STEPS steps: from well
@@ -49,18 +50,24 @@ export const yawUnits = rad => ((Math.round((rad * YAW_STEPS) / (2 * Math.PI)) %
 export const pitchUnits = rad => Math.max(0, Math.min(PITCH_STEPS - 1, Math.round(((rad - PITCH_MIN) * (PITCH_STEPS - 1)) / (PITCH_MAX - PITCH_MIN))));
 export const START_PITCH = pitchUnits(0.39); // about 22 degrees above level
 // While the turntable turns on its own and crew on the pads have waited SEEK ticks with nothing
-// of their colour in view, the camera looks for it: up high for LOOK ticks (into pits), then down
-// low for LOOK ticks (under parts that stick out), one pitch step a tick, and back to the height
-// the player left it at (st.home) once a shot flies. Only after all that (STALL) does a shot take
-// a cube hidden behind another part (target()). The checks below call a board settled after twice
-// STALL with nothing fired or landed.
+// of their colour in view, the camera looks for it: it goes to the height nearest its own from
+// which a fair part of one of their cubes shows at some turn of the turntable (seekHeight()) and
+// the turntable brings that side round; with no such height it looks from high up (into pits) for
+// LOOK ticks, then from below the turntable (under parts that stick out) for LOOK ticks. If by
+// STALL nothing has flown, a cube that shows only a sliver will do (st.sliver), and if none shows
+// from where the camera is, the camera swings round to a view that shows one (swing()). It goes
+// back to the height the player left it at (st.home) once a shot flies. A shot never takes a cube
+// the camera cannot see: crew whose colour shows from nowhere wait until the cubes covering it go
+// (the player sends other crew), or until the player turns or tilts the sculpture to show it. The
+// checks below call a board settled after twice STALL with nothing fired or landed.
 export const SEEK = 120;
 export const LOOK = 200;
 export const STALL = SEEK + 2 * LOOK;
 // While it looks around, the camera's height moves SEEK_JUMP pitch steps every SEEK_STEP ticks (the
-// screen glides between them); what is in view is worked out again at each.
-const SEEK_STEP = 15, SEEK_JUMP = 5;
-const HIGH = pitchUnits(1.1), LOW = pitchUnits(0.1);
+// screen glides between them, so the steps are kept small); what is in view is worked out again at
+// each.
+const SEEK_STEP = 5, SEEK_JUMP = 2;
+const HIGH = pitchUnits(1.3), BELOW = pitchUnits(-0.75);
 // The latest tick a saved attempt may name (about 90 hours of play at 30 ticks a second). Ticks
 // stay whole numbers far below this, so tick + FLIGHT is always exact and every replay ends.
 export const MAX_TICK = 1e7;
@@ -266,16 +273,13 @@ export function removeCube(st, i) {
 }
 
 // ---------- the view: what the camera sees ----------
-// While the turntable turns, the rules look from the middle of the step of VIEW_STEP (about 5.6
+// While the turntable turns, the rules look from the middle of the step of VIEW_STEP (about 2.8
 // degrees) it is in, so what is in view changes 64 times a turn, not every tick, and is worked out
-// once for each. While the player holds it still they look from exactly where it stands.
-export const VIEW_STEP = 128;
-// While nothing has fired for a moment (st.quiet), the turntable's view is worked out in steps
-// twice as long: a crew member waiting for its colour wakes up to half a second after it comes
-// into view, and the waiting costs half as much to work out.
-const stepOf = st => (st.quiet > 0 ? VIEW_STEP * 2 : VIEW_STEP);
-const yawKey = st => (st.spin ? (st.quiet > 0 ? 1e5 : 0) + Math.floor(st.yaw / stepOf(st)) : YAW_STEPS / VIEW_STEP + st.yaw);
-const viewYaw = st => (st.spin ? Math.floor(st.yaw / stepOf(st)) * stepOf(st) + stepOf(st) / 2 : st.yaw);
+// once for each; the screen is never more than 1.4 degrees from the view the rules use. While the
+// player holds it still they look from exactly where it stands.
+export const VIEW_STEP = 64;
+const yawKey = st => (st.spin ? Math.floor(st.yaw / VIEW_STEP) : YAW_STEPS / VIEW_STEP + st.yaw);
+const viewYaw = st => (st.spin ? Math.floor(st.yaw / VIEW_STEP) * VIEW_STEP + VIEW_STEP / 2 : st.yaw);
 const viewKey = st => yawKey(st) * PITCH_STEPS + st.pitch;
 
 // The camera's direction seen from the sculpture, in the grid's own frame: the turntable turned by
@@ -299,23 +303,35 @@ const CAM_FOV = 14, CAM_ASPECT = 0.66;
 export function camPos(st) {
   const key = viewKey(st);
   if (st._ck === key) return st._cam;
-  const p = pitchRad(st.pitch), sp = Math.sin(p), cp = Math.cos(p);
-  const a = yawRad(viewYaw(st));
-  const top = st.topY, rad = st.tableR, reachR = st.reachR;
-  const ty = -0.6 + (top + 0.6) * 0.46;
-  const tan = Math.tan((CAM_FOV * Math.PI) / 360), tanUp = tan * 0.92, tanDown = tan * 0.74, tanH = tan * CAM_ASPECT * 0.9;
-  let d = 0;
-  const fit = (x, y, z) => {
-    const dy = y - ty, depth = dy * sp + z * cp, up = dy * cp - z * sp;
-    d = Math.max(d, depth + Math.abs(x) / tanH, depth + Math.abs(up) / (up > 0 ? tanUp : tanDown));
-  };
-  for (let k = 0; k < 24; k++) {
-    const t = (k / 24) * Math.PI * 2, c = Math.cos(t), s = Math.sin(t);
-    fit(c * rad, -0.6, s * rad); fit(c * rad, 0, s * rad); fit(c * reachR, top, s * reachR);
-  }
   st._ck = key;
-  st._cam = [st.sx / 2 - cp * d * Math.sin(a), ty + sp * d, st.sz / 2 + cp * d * Math.cos(a)];
+  st._cam = camAt(st, viewYaw(st), st.pitch);
   return st._cam;
+}
+
+// Where the camera is for the view with the turntable turned `yaw` steps and the camera `pitch`
+// steps high (camPos() is the board's own view). How far back it stands depends only on the height
+// and the sculpture's size, which never change on a board, so it is worked out once per height.
+function camAt(st, yaw, pitch) {
+  const p = pitchRad(pitch), sp = Math.sin(p), cp = Math.cos(p);
+  const a = yawRad(yaw);
+  const ty = -0.6 + (st.topY + 0.6) * 0.46;
+  if (!st.camD) st.camD = new Float64Array(PITCH_STEPS).fill(-1);
+  let d = st.camD[pitch];
+  if (d < 0) {
+    const top = st.topY, rad = st.tableR, reachR = st.reachR;
+    const tan = Math.tan((CAM_FOV * Math.PI) / 360), tanUp = tan * 0.92, tanDown = tan * 0.74, tanH = tan * CAM_ASPECT * 0.9;
+    d = 0;
+    const fit = (x, y, z) => {
+      const dy = y - ty, depth = dy * sp + z * cp, up = dy * cp - z * sp;
+      d = Math.max(d, depth + Math.abs(x) / tanH, depth + Math.abs(up) / (up > 0 ? tanUp : tanDown));
+    };
+    for (let k = 0; k < 24; k++) {
+      const t = (k / 24) * Math.PI * 2, c = Math.cos(t), s = Math.sin(t);
+      fit(c * rad, -0.6, s * rad); fit(c * rad, 0, s * rad); fit(c * reachR, top, s * reachR);
+    }
+    st.camD[pitch] = d;
+  }
+  return [st.sx / 2 - cp * d * Math.sin(a), ty + sp * d, st.sz / 2 + cp * d * Math.cos(a)];
 }
 
 // The line from (cx, ., cz) in direction (dx, ., dz) crosses the turntable's top at distance t.
@@ -403,7 +419,7 @@ export function seen(st, i) {
 // The faces of cube i on the outside air (its neighbour that way is outside the grid or outside
 // air; below the bottom layer is the turntable), one bit each in FACE_N's order.
 const FACE_N = [[1, 0, 0], [-1, 0, 0], [0, 0, 1], [0, 0, -1], [0, 1, 0], [0, -1, 0]];
-const FACE_FACING = 0.25; // turned less than about 75 degrees from the camera
+const FACE_FACING = 0.3; // turned less than about 72 degrees from the camera: edge-on is a sliver
 // The points of a face whose lines to the camera are tried: its middle and near its four corners,
 // so a face half under a part that sticks out still counts.
 const FACE_POINTS = [[0, 0], [0.4, 0.4], [-0.4, 0.4], [0.4, -0.4], [-0.4, -0.4]];
@@ -424,13 +440,18 @@ function openFaces(st, i) {
   return m;
 }
 
-// Some face of cube i on the outside air is turned to the camera and the line from its middle to
-// the camera is clear. Kept per cube for this view and these faces: clear stays clear, and blocked
-// stays blocked while every cube that blocked a face is still there.
+// Some face of cube i on the outside air is turned to the camera and the lines from at least
+// FACE_NEED of its points to the camera are clear: a fair part of it shows, not a sliver at an
+// edge. Only once crew have waited a whole look around with nothing of theirs showing (st.sliver,
+// step()) does one clear line do, so a cube that only ever shows a sliver can still be hit; a cube
+// with no clear line at all never is. Kept per cube for this view, these faces and that need:
+// clear stays clear, and blocked stays blocked while every cube that blocked a line is still there.
+const FACE_NEED = 2;
 function faceView(st, i) {
   const open = openFaces(st, i);
   if (!open) return false;
-  const key = viewKey(st) * 64 + open;
+  const need = st.sliver ? 1 : FACE_NEED;
+  const key = (viewKey(st) * 64 + open) * 2 + need - 1;
   const base = i * F_KEEP;
   if (st.fKey[i] === key) {
     const k = st.fN[i];
@@ -450,12 +471,13 @@ function faceView(st, i) {
     const ox = C[0] - fx, oy = C[1] - fy, oz = C[2] - fz;
     if (n[0] * ox + n[1] * oy + n[2] * oz <= FACE_FACING * Math.hypot(ox, oy, oz)) continue;
     const ax = n[0] ? 0 : n[1] ? 1 : 2; // the face's edges run along the other two axes
+    let clear = 0;
     for (let q = 0; q < FACE_POINTS.length; q++) {
       const a = FACE_POINTS[q][0], b2 = FACE_POINTS[q][1];
       const px = fx + (ax === 1 ? b2 : ax === 2 ? a : 0), py = fy + (ax === 2 ? b2 : ax === 0 ? a : 0), pz = fz + (ax === 0 ? b2 : ax === 1 ? a : 0);
       const wx = C[0] - px, wy = C[1] - py, wz = C[2] - pz, L = Math.hypot(wx, wy, wz);
       const b = lineFrom(st, i, px, py, pz, wx / L, wy / L, wz / L);
-      if (b === -1) { st.fN[i] = 255; return true; }
+      if (b === -1) { if (++clear >= need) { st.fN[i] = 255; return true; } continue; }
       if (k < F_KEEP) st.fBlock[base + k] = b;
       k++;
     }
@@ -523,18 +545,17 @@ export const canFire = (st, slot) => canReach(st, slot) && !(st.slots[slot].land
 
 // The cube a crew member of colour c would hit now under the targeting rule; -1 when none: of the
 // cubes on the outside with a face turned to the camera, the first in the targeting order with a clear line
-// to the camera (seen()). Only when crew have waited a whole turn of the turntable with nothing
-// in view at all (st.quiet over STALL: the colour is under a part that sticks out, or down a pit)
-// does a shot take the first of them that is hidden; the player can turn and tilt the sculpture to
-// bring one into view sooner. Worked out once for each step of the view and each change to the
-// board (st.rev), since a pad asks every tick.
+// to the camera (seen()). A cube the camera cannot see is never taken: crew whose colour is all
+// hidden wait, while the camera looks around (step()) or the player turns and tilts the sculpture
+// to bring one into view. Worked out once for each step of the view and each change to the board
+// (st.rev), since a pad asks every tick.
 export function target(st, c) {
-  const key = viewKey(st) * 2 ** 28 + (st.rev % 2 ** 26) * 2 + (st.quiet > STALL ? 1 : 0);
+  const key = viewKey(st) * 2 ** 27 + (st.rev % 2 ** 25) * 2 + (st.sliver ? 1 : 0);
   if (st.aimKey[c] === key) return st.aimCell[c];
   // While the board stays as it is, the turntable brings the same views round again: what each
   // colour can hit from each is kept until something on the board changes (st.rev).
   if (st.memoRev !== st.rev || !st.memo) { st.memo = new Map(); st.memoRev = st.rev; }
-  const mk = (viewKey(st) * 2 + (st.quiet > STALL ? 1 : 0)) * 64 + c;
+  const mk = (viewKey(st) * 2 + (st.sliver ? 1 : 0)) * 64 + c;
   const known = st.memo.get(mk);
   if (known !== undefined) { st.aimKey[c] = key; st.aimCell[c] = known; return known; }
   const pick = aim(st, c);
@@ -552,20 +573,17 @@ function aim(st, c) {
   }
   // The quick check first; only when it finds nothing, every face.
   const m = sideMask(st);
-  let any = -1;
   for (let k = 0; k < list.length; k++) {
     const i = list[k];
-    if (!set.has(i)) continue;
-    if (any < 0) any = i;
-    if (plainView(st, i, m)) return i;
+    if (set.has(i) && plainView(st, i, m)) return i;
   }
-  // Then any face of a cube on the outside air turned to the camera with the line from its middle
-  // to the camera clear: a cube seen at a slant, into a notch or from below.
+  // Then any face of a cube on the outside air turned to the camera with a fair part of it in
+  // clear sight of the camera: a cube seen at a slant, into a notch or from below.
   for (let k = 0; k < list.length; k++) {
     const i = list[k];
     if (set.has(i) && faceView(st, i)) return i;
   }
-  return st.quiet > STALL ? any : -1;
+  return -1;
 }
 
 // One shot leaves a pad: it takes its cube (no other shot aims at it) and is in the air until
@@ -591,6 +609,103 @@ export function launch(st, slot) {
 // A shot lands: its cube goes and the cubes behind it open up.
 export const land = (st, cell) => removeCube(st, cell);
 
+// Face f of cube i (FACE_N's order) shows from the camera at C: turned to it, and `need` of
+// FACE_POINTS in clear sight, as faceView() asks of the board's own view.
+function faceShows(st, i, f, C, need) {
+  const { sx, sy } = st, n = FACE_N[f];
+  const fx = (i % sx) + 0.5 + n[0] * 0.5, fy = (Math.floor(i / sx) % sy) + 0.5 + n[1] * 0.5, fz = Math.floor(i / (sx * sy)) + 0.5 + n[2] * 0.5;
+  const ox = C[0] - fx, oy = C[1] - fy, oz = C[2] - fz;
+  if (n[0] * ox + n[1] * oy + n[2] * oz <= FACE_FACING * Math.hypot(ox, oy, oz)) return false;
+  const ax = n[0] ? 0 : n[1] ? 1 : 2;
+  let clear = 0;
+  for (let q = 0; q < FACE_POINTS.length; q++) {
+    const a = FACE_POINTS[q][0], b2 = FACE_POINTS[q][1];
+    const px = fx + (ax === 1 ? b2 : ax === 2 ? a : 0), py = fy + (ax === 2 ? b2 : ax === 0 ? a : 0), pz = fz + (ax === 0 ? b2 : ax === 1 ? a : 0);
+    const wx = C[0] - px, wy = C[1] - py, wz = C[2] - pz, L = Math.hypot(wx, wy, wz);
+    if (lineFrom(st, i, px, py, pz, wx / L, wy / L, wz / L) === -1 && ++clear >= need) return true;
+  }
+  return false;
+}
+
+// The turn of the turntable that faces each side of the grid to the camera (FACE_N's order), and
+// the turns tried around it: a side shows from up to about 70 degrees either way.
+const SIDE_YAW = [(3 * YAW_STEPS) / 4, YAW_STEPS / 4, 0, YAW_STEPS / 2];
+const SEEK_YAWS = [0, 1, -1, 2, -2].map(k => (k * YAW_STEPS) / 20);
+const SEEK_CUBES = 4, SEEK_PITCH_STEP = 4, SWING_CUBES = 3, SWING_STEP = 2;
+// The cubes the crew on the pads wait for, as [cube, face, ...] for each open face, up to `most`
+// cubes of each colour.
+function waitedFaces(st, most) {
+  const faces = [];
+  for (const s of st.slots) {
+    if (!s || !(s.count > 0) || s.land > 0) continue;
+    let k = 0;
+    for (const i of st.exposed[s.color]) {
+      const open = openFaces(st, i);
+      for (let f = 0; f < 6; f++) if (open & (1 << f)) faces.push(i, f);
+      if (++k >= most) break;
+    }
+  }
+  return faces;
+}
+// A search that found nothing finds nothing again while the board and the crew waiting stay the
+// same (it does not depend on where the camera is), so that answer is kept, per kind of search.
+const missKey = (st, kind) => `${kind} ${st.rev} ${st.slots.map(s => (s && s.count > 0 && !(s.land > 0) ? s.color : -1)).join()}`;
+// The heights in pitch steps, nearest the camera's own first.
+function* heights(st, by) {
+  yield st.pitch;
+  for (let d = by; d < PITCH_STEPS; d += by) {
+    if (st.pitch + d < PITCH_STEPS) yield st.pitch + d;
+    if (st.pitch - d >= 0) yield st.pitch - d;
+  }
+}
+// For crew waiting with nothing in view: the camera height, in pitch steps and nearest its own,
+// from which a fair part (FACE_NEED points) of an open face of one of the cubes they wait for
+// shows, looking at that side from straight on or up to 36 degrees either way (from any side for a
+// top or an underside); -1 when none of every third height shows one. Up to SEEK_CUBES of each
+// colour's cubes are tried.
+function seekHeight(st) {
+  const miss = missKey(st, 'h');
+  if (st.seekMiss === miss) return -1;
+  const faces = waitedFaces(st, SEEK_CUBES);
+  const cams = new Map();
+  const cam = (y, u) => { const key = y * PITCH_STEPS + u; let c = cams.get(key); if (!c) cams.set(key, (c = camAt(st, y, u))); return c; };
+  for (const u of faces.length ? heights(st, SEEK_PITCH_STEP) : []) {
+    for (let q = 0; q < faces.length; q += 2) {
+      const i = faces[q], f = faces[q + 1];
+      for (let a = 0; a < (f < 4 ? 1 : 4); a++) {
+        const y0 = SIDE_YAW[f < 4 ? f : a];
+        for (const dy of SEEK_YAWS) if (faceShows(st, i, f, cam(turned(y0, dy), u), FACE_NEED)) return u;
+      }
+    }
+  }
+  st.seekMiss = miss;
+  return -1;
+}
+// After STALL with nothing flown: a sliver will do from now on (faceView()). If no cube the crew
+// wait for shows even a sliver from where the camera is, the camera swings round to the nearest
+// height, and the step of the turn, from which one does (it glides there on the screen in about a
+// fifth of a second, while the shot flies). Looked for among SWING_CUBES of each colour's cubes;
+// when none shows from anywhere, the view stays as it is.
+function swing(st) {
+  st.sliver = true;
+  for (const s of st.slots) if (s && s.count > 0 && !(s.land > 0) && target(st, s.color) >= 0) return;
+  const miss = missKey(st, 's');
+  if (st.swingMiss === miss) return;
+  const faces = waitedFaces(st, SWING_CUBES);
+  const here = Math.floor(st.yaw / VIEW_STEP);
+  const n = YAW_STEPS / VIEW_STEP;
+  for (const u of faces.length ? heights(st, SWING_STEP) : []) {
+    for (let k = 0; k < n; k += SWING_STEP) {
+      const y = (((here + (k % 2 ? (k + 1) / 2 : -k / 2)) % n + n) % n) * VIEW_STEP + VIEW_STEP / 2;
+      const C = camAt(st, y, u);
+      for (let q = 0; q < faces.length; q += 2) {
+        if (faceShows(st, faces[q], faces[q + 1], C, 1)) { st.yaw = y; st.pitch = u; st.seekH = u; return; }
+      }
+    }
+  }
+  st.swingMiss = miss;
+}
+
 // One tick: the turntable turns by st.spin, the shots due now land (in the order they left), crew
 // still landing on a pad come one tick closer, then every pad that can fire sends one shot, pad by
 // pad from the left. Returns what happened, for the screen.
@@ -598,7 +713,12 @@ export function step(st) {
   st.tick++;
   st.yaw = turned(st.yaw, st.spin);
   if (st.spin) { // turning on its own: the camera looks for what the crew wait for (SEEK)
-    const want = st.quiet < SEEK ? st.home : st.quiet < SEEK + LOOK ? HIGH : LOW;
+    let want = st.home;
+    if (st.quiet >= SEEK) {
+      if (!(st.seekH >= -1)) st.seekH = seekHeight(st);
+      if (st.quiet === STALL) swing(st);
+      want = st.seekH >= 0 ? st.seekH : Math.floor((st.quiet - SEEK) / LOOK) % 2 ? BELOW : HIGH;
+    }
     if (st.tick % SEEK_STEP === 0) st.pitch += Math.sign(want - st.pitch) * Math.min(SEEK_JUMP, Math.abs(want - st.pitch));
   }
   const landed = [];
@@ -617,6 +737,7 @@ export function step(st) {
   if (shots.length || landed.length) st.quiet = 0;
   else if (st.slots.some(s => s && s.count > 0 && !(s.land > 0) && st.exposed[s.color].size)) st.quiet++;
   else st.quiet = 0;
+  if (!st.quiet) { st.seekH = -2; st.sliver = false; }
   return { landed, shots };
 }
 
@@ -671,7 +792,7 @@ export function advance(st, tick) {
       st.yaw = turned(st.yaw, st.spin * dt);
       const steps = (Math.floor(tick / SEEK_STEP) - Math.floor(st.tick / SEEK_STEP)) * SEEK_JUMP; // as step() does
       if (st.spin) st.pitch += Math.sign(st.home - st.pitch) * Math.min(steps, Math.abs(st.home - st.pitch));
-      st.quiet = 0;
+      st.quiet = 0; st.seekH = -2; st.sliver = false;
       st.tick = tick;
       break;
     }
