@@ -49,7 +49,7 @@ for (const n of levels) {
           if (px === 0) tally[name + '0']++;
           if (name === 'phone' && px > 0 && px < full * 0.1) tally.sliver++;
         }
-        const yl = R.turned(st.yaw, st.spin * R.FLIGHT);
+        const yl = st.hold > 0 ? st.yaw : R.turned(st.yaw, st.spin * R.FLIGHT);
         const c = cam(st, yl, st.pitch, 0.66);
         if (!(pixels(st, c.pos, c.at, FOV, 0.66, 390, 590).get(s.cell) || 0)) tally.land0++;
       }

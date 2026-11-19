@@ -146,8 +146,9 @@ export function makeBoard(model) {
     yaw: START_YAW, pitch: START_PITCH, spin: TURN, home: START_PITCH,
     rev: 0, quiet: 0, aimKey: new Float64Array(n).fill(-1), aimCell: new Int32Array(n),
     // The camera's swing for crew who wait (step()): the height it swung to, whether a sliver will
-    // do, the search known to find nothing, and how far back the camera stands at each height.
-    seekH: -2, sliver: false, swingMiss: '', camD: new Float64Array(PITCH_STEPS).fill(-1),
+    // do, the search known to find nothing, how far back the camera stands at each height, and
+    // how many more ticks the view holds still while the shot it swung for flies.
+    seekH: -2, sliver: false, swingMiss: '', camD: new Float64Array(PITCH_STEPS).fill(-1), hold: 0,
     columns: [], slots: Array(START_SLOTS).fill(null),
   };
   for (let i = 0; i < cells.length; i++) {
@@ -670,13 +671,14 @@ function viewShowing(st, need) {
 }
 // Crew have waited SEEK ticks with nothing of theirs in view: the camera swings to the nearest view
 // that shows a fair part of a cube they wait for, else to one that shows a sliver (and a sliver
-// will do, faceView()); when none shows from anywhere, the view stays as it is.
+// will do, faceView()); when none shows from anywhere, the view stays as it is. The view then holds
+// still for FLIGHT ticks (st.hold), so the cube still shows when the shot lands.
 function swing(st) {
   for (const s of st.slots) if (s && s.count > 0 && !(s.land > 0) && target(st, s.color) >= 0) return;
   for (const need of [FACE_NEED, 1]) {
     const v = viewShowing(st, need);
     if (!v) continue;
-    st.yaw = v[0]; st.pitch = v[1]; st.seekH = v[1];
+    st.yaw = v[0]; st.pitch = v[1]; st.seekH = v[1]; st.hold = FLIGHT;
     if (need === 1) st.sliver = true;
     return;
   }
@@ -687,11 +689,14 @@ function swing(st) {
 // pad from the left. Returns what happened, for the screen.
 export function step(st) {
   st.tick++;
-  st.yaw = turned(st.yaw, st.spin);
-  if (st.spin) { // turning on its own: the camera looks for what the crew wait for (SEEK)
-    if (st.quiet === SEEK) swing(st);
-    const want = st.quiet >= SEEK && st.seekH >= 0 ? st.seekH : st.home;
-    if (st.tick % SEEK_STEP === 0) st.pitch += Math.sign(want - st.pitch) * Math.min(SEEK_JUMP, Math.abs(want - st.pitch));
+  if (st.hold > 0) st.hold--; // the view holds still while a shot the camera swung for flies (swing())
+  else {
+    st.yaw = turned(st.yaw, st.spin);
+    if (st.spin) { // turning on its own: the camera looks for what the crew wait for (SEEK)
+      if (st.quiet === SEEK) swing(st);
+      const want = st.quiet >= SEEK && st.seekH >= 0 ? st.seekH : st.home;
+      if (st.tick % SEEK_STEP === 0) st.pitch += Math.sign(want - st.pitch) * Math.min(SEEK_JUMP, Math.abs(want - st.pitch));
+    }
   }
   const landed = [];
   while (st.flying.length && st.flying[0].at <= st.tick) {
