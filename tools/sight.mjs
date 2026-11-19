@@ -1,7 +1,7 @@
 // A picture of the screen, worked out in plain JavaScript: the sculpture drawn from a camera
 // with a depth buffer, one number per pixel naming the cube that shows there. The checks use it
 // to prove the crew hit only cubes the player can see (test/logic.test.mjs and
-// node tools/sight.mjs, which plays levels and counts hits on cubes with too little of them
+// node tools/sightrun.mjs, which plays levels and counts hits on cubes with too little of them
 // on screen).
 //
 // Coordinates are the rules' own (js/logic.js): cell (x, y, z) spans [x, x + 1) on each axis.

@@ -4,7 +4,8 @@ import { readFileSync } from 'node:fs';
 import { spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import { makeBoard, cloneBoard, removeCube, deploy, fire, step, settle, launch, target, isJammed, isWon, canFire, canReach, purgeCleared, isExposed, freeSlot, FLIGHT, tickGame, advance, forecast, forecastKey, fates, busy, revealLone, checkOf, pace, Attempt, FAST,
-  setView, seen, pitchUnits, pitchRad, YAW_STEPS, START_YAW, START_PITCH, PITCH_STEPS, TURN, SEEK, STALL } from '../js/logic.js';
+  setView, seen, camPos, pitchUnits, pitchRad, YAW_STEPS, START_YAW, START_PITCH, PITCH_STEPS, TURN, SEEK, STALL } from '../js/logic.js';
+import { pixels } from '../tools/sight.mjs';
 import { LEVELS, buildLevel, dealLevel, levelPrint, rng } from '../js/levels.js';
 import { plan, greedy, greedyCheck, hastyCheck, hastyGreedy, lineHolds, playLine, onClock, earlyParks, forecastFirst, backtrack, forecastCheck, hastyForecastCheck, backtrackCheck, firingTime, curveMisses, GAPS, LAND, GREEDY_PLAYS, PARK_MIN } from '../tools/players.mjs';
 
@@ -274,6 +275,32 @@ test('the camera that looks around for crew who wait looks from below the turnta
   while (shotAt < 0 && st.tick < 2 * STALL) if (step(st).shots.length) shotAt = st.tick;
   assert.ok(shotAt > SEEK && shotAt <= STALL + 1, `green fired once the camera looked from below (tick ${shotAt})`);
   assert.ok(st.pitch < START_PITCH, 'the camera was looking from low down');
+});
+
+test('every shot takes a cube that shows on the phone screen at the moment it leaves', () => {
+  // Plays Robot, Lighthouse and Castle, sending a line whose front crew member can shoot now, else
+  // any line once nothing moves, and draws the screen the rules look from (a phone held upright, at
+  // twice its size) at every shot: the cube shot at shows in it, never one hidden behind another part.
+  let shots = 0;
+  for (const n of [4, 8, 17]) {
+    const st = buildLevel(n).board, rand = rng(41 + n);
+    for (let guard = 0; guard < 30000 && shots < 120 * (1 + [4, 8, 17].indexOf(n)) && !isWon(st) && !isJammed(st); guard++) {
+      if (freeSlot(st) >= 0) {
+        const cols = st.columns.map((_, i) => i).filter(i => st.columns[i].length);
+        const ready = cols.filter(i => target(st, st.columns[i][0].color) >= 0);
+        if (ready.length) deploy(st, ready[0]);
+        else if (cols.length && !busy(st)) deploy(st, cols[Math.floor(rand() * cols.length)]);
+      }
+      const r = tickGame(st);
+      for (const s of r.shots) {
+        shots++;
+        const ty = -0.6 + (st.topY + 0.6) * 0.46;
+        const shown = pixels(st, camPos(st), [st.sx / 2, ty, st.sz / 2], 14, 0.66, 780, 1180).get(s.cell) || 0;
+        assert.ok(shown > 0, `${LEVELS[n].name}: a shot at tick ${st.tick} took cube ${s.cell}, which does not show on the screen`);
+      }
+    }
+  }
+  assert.ok(shots >= 200, `only ${shots} shots were checked`);
 });
 
 test('the view the player turns to is kept with the attempt: undo, save and restore give the same board', () => {
