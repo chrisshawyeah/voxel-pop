@@ -151,6 +151,9 @@ export function makeBoard(model) {
     tick: 0, flying: [],
     yaw: START_YAW, pitch: START_PITCH, spin: TURN, home: START_PITCH,
     rev: 0, quiet: 0, aimKey: new Float64Array(n).fill(-1), aimCell: new Int32Array(n),
+    // The camera's look around for crew who wait (step()): the height it goes to, whether a sliver
+    // will do, the searches known to find nothing, and how far back it stands at each height.
+    seekH: -2, sliver: false, seekMiss: '', swingMiss: '', camD: new Float64Array(PITCH_STEPS).fill(-1),
     columns: [], slots: Array(START_SLOTS).fill(null),
   };
   for (let i = 0; i < cells.length; i++) {
@@ -1046,10 +1049,12 @@ export function purgeCleared(st) {
 }
 
 // Stuck: no shot is in the air, nothing on a pad can fire, and no shooter can be added
-// (pads full or queues empty).
+// (pads full or queues empty). Crew still waiting for cubes of their colour count as able to
+// fire until they have waited twice STALL (st.quiet): by then the camera has looked all round and
+// what they wait for shows from nowhere, so only cubes of other colours going can free them.
 export function isJammed(st) {
   if (isWon(st) || st.flying.length) return false;
-  for (let i = 0; i < st.slots.length; i++) if (canReach(st, i)) return false;
+  if (st.quiet <= 2 * STALL) for (let i = 0; i < st.slots.length; i++) if (canReach(st, i)) return false;
   const anyQueued = st.columns.some(c => c.length);
   return freeSlot(st) < 0 || !anyQueued;
 }
