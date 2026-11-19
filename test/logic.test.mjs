@@ -237,13 +237,13 @@ test('the camera can look from below and from almost straight above; from below 
   assert.equal(seen(st, 0), true, 'from almost straight above, its top');
 });
 
-test('crew who wait with nothing in view make the camera look for it; held still they never hit a hidden cube', () => {
-  // Turning on its own: the camera rises after SEEK ticks of waiting and finds the pit's floor.
+test('crew who wait with nothing in view make the camera swing to it; held still they never hit a hidden cube', () => {
+  // Turning on its own: after SEEK ticks of waiting the camera swings up to see the pit's floor.
   const a = makeBoard(pit());
   a.slots = [crew(0, 1, 1)];
   let shotAt = -1;
   while (shotAt < 0 && a.tick < 2 * STALL) if (step(a).shots.length) shotAt = a.tick;
-  assert.ok(shotAt > SEEK && shotAt < SEEK + 300, `the camera looked higher and green fired at tick ${shotAt}`);
+  assert.ok(shotAt > SEEK && shotAt <= SEEK + 1, `the camera swung higher and green fired at tick ${shotAt}`);
   assert.ok(a.pitch > START_PITCH);
   settle(a);
   for (let k = 0; k < 200; k++) step(a); // the camera glides back a few steps at a time
@@ -261,7 +261,7 @@ test('crew who wait with nothing in view make the camera look for it; held still
   assert.equal(step(b).shots.length, 1, 'tilted up, green fires at once');
 });
 
-test('the camera that looks around for crew who wait looks from below the turntable too, under a part that sticks out', () => {
+test('the camera that swings for crew who wait looks from below the turntable too, under a part that sticks out', () => {
   // A red post with a red arm sticking out at the top; one green cube hangs under the arm's end,
   // with red on its four sides, so only its underside is open to the air: only from below is it seen.
   const cubes = [[1, 0, 1, 1], [1, 1, 1, 1], [1, 2, 1, 1], [1, 3, 1, 1], [2, 3, 1, 1], [3, 3, 1, 1], [3, 2, 1, 2],
@@ -273,7 +273,7 @@ test('the camera that looks around for crew who wait looks from below the turnta
   st.slots = [crew(0, 1, 1)];
   let shotAt = -1;
   while (shotAt < 0 && st.tick < 2 * STALL) if (step(st).shots.length) shotAt = st.tick;
-  assert.ok(shotAt > SEEK && shotAt <= STALL + 1, `green fired once the camera looked from below (tick ${shotAt})`);
+  assert.ok(shotAt > SEEK && shotAt <= SEEK + 1, `green fired once the camera swung below (tick ${shotAt})`);
   assert.ok(st.pitch < START_PITCH, 'the camera was looking from low down');
 });
 

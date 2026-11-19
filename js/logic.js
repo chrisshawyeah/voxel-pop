@@ -50,24 +50,18 @@ export const yawUnits = rad => ((Math.round((rad * YAW_STEPS) / (2 * Math.PI)) %
 export const pitchUnits = rad => Math.max(0, Math.min(PITCH_STEPS - 1, Math.round(((rad - PITCH_MIN) * (PITCH_STEPS - 1)) / (PITCH_MAX - PITCH_MIN))));
 export const START_PITCH = pitchUnits(0.39); // about 22 degrees above level
 // While the turntable turns on its own and crew on the pads have waited SEEK ticks with nothing
-// of their colour in view, the camera looks for it: it goes to the height nearest its own from
-// which a fair part of one of their cubes shows at some turn of the turntable (seekHeight()) and
-// the turntable brings that side round; with no such height it looks from high up (into pits) for
-// LOOK ticks, then from below the turntable (under parts that stick out) for LOOK ticks. If by
-// STALL nothing has flown, a cube that shows only a sliver will do (st.sliver), and if none shows
-// from where the camera is, the camera swings round to a view that shows one (swing()). It goes
-// back to the height the player left it at (st.home) once a shot flies. A shot never takes a cube
-// the camera cannot see: crew whose colour shows from nowhere wait until the cubes covering it go
-// (the player sends other crew), or until the player turns or tilts the sculpture to show it. The
-// checks below call a board settled after twice STALL with nothing fired or landed.
+// of their colour in view, the camera swings round to the nearest view that shows a fair part of
+// one of their cubes, or failing that a sliver of one (swing()), and they fire at it; the screen
+// glides there in about a fifth of a second, while the shot flies. The camera goes back to the
+// height the player left it at (st.home) once a shot flies. A shot never takes a cube the camera
+// cannot see: crew whose colour shows from no view wait until the cubes covering it go (the player
+// sends other crew), or until the player turns or tilts the sculpture to show it. The checks below
+// call a board settled after twice STALL ticks with nothing fired or landed.
 export const SEEK = 120;
-export const LOOK = 200;
-export const STALL = SEEK + 2 * LOOK;
-// While it looks around, the camera's height moves SEEK_JUMP pitch steps every SEEK_STEP ticks (the
-// screen glides between them, so the steps are kept small); what is in view is worked out again at
-// each.
+export const STALL = 520;
+// While it moves, the camera's height changes by SEEK_JUMP pitch steps every SEEK_STEP ticks (the
+// screen glides between them).
 const SEEK_STEP = 5, SEEK_JUMP = 2;
-const HIGH = pitchUnits(1.3), BELOW = pitchUnits(-0.75);
 // The latest tick a saved attempt may name (about 90 hours of play at 30 ticks a second). Ticks
 // stay whole numbers far below this, so tick + FLIGHT is always exact and every replay ends.
 export const MAX_TICK = 1e7;
@@ -151,9 +145,9 @@ export function makeBoard(model) {
     tick: 0, flying: [],
     yaw: START_YAW, pitch: START_PITCH, spin: TURN, home: START_PITCH,
     rev: 0, quiet: 0, aimKey: new Float64Array(n).fill(-1), aimCell: new Int32Array(n),
-    // The camera's look around for crew who wait (step()): the height it goes to, whether a sliver
-    // will do, the searches known to find nothing, and how far back it stands at each height.
-    seekH: -2, sliver: false, seekMiss: '', swingMiss: '', camD: new Float64Array(PITCH_STEPS).fill(-1),
+    // The camera's swing for crew who wait (step()): the height it swung to, whether a sliver will
+    // do, the search known to find nothing, and how far back the camera stands at each height.
+    seekH: -2, sliver: false, swingMiss: '', camD: new Float64Array(PITCH_STEPS).fill(-1),
     columns: [], slots: Array(START_SLOTS).fill(null),
   };
   for (let i = 0; i < cells.length; i++) {
@@ -445,9 +439,9 @@ function openFaces(st, i) {
 
 // Some face of cube i on the outside air is turned to the camera and the lines from at least
 // FACE_NEED of its points to the camera are clear: a fair part of it shows, not a sliver at an
-// edge. Only once crew have waited a whole look around with nothing of theirs showing (st.sliver,
-// step()) does one clear line do, so a cube that only ever shows a sliver can still be hit; a cube
-// with no clear line at all never is. Kept per cube for this view, these faces and that need:
+// edge. Only when no view shows a fair part of any cube the waiting crew can hit does the camera
+// swing to one that shows a sliver, and then one clear line does (st.sliver, swing()), so a cube
+// that only ever shows a sliver can still be hit; a cube with no clear line at all never is. Kept per cube for this view, these faces and that need:
 // clear stays clear, and blocked stays blocked while every cube that blocked a line is still there.
 const FACE_NEED = 2;
 function faceView(st, i) {
@@ -630,11 +624,7 @@ function faceShows(st, i, f, C, need) {
   return false;
 }
 
-// The turn of the turntable that faces each side of the grid to the camera (FACE_N's order), and
-// the turns tried around it: a side shows from up to about 70 degrees either way.
-const SIDE_YAW = [(3 * YAW_STEPS) / 4, YAW_STEPS / 4, 0, YAW_STEPS / 2];
-const SEEK_YAWS = [0, 1, -1, 2, -2].map(k => (k * YAW_STEPS) / 20);
-const SEEK_CUBES = 4, SEEK_PITCH_STEP = 4, SWING_CUBES = 3, SWING_STEP = 2;
+const SWING_CUBES = 3, SWING_STEP = 2;
 // The cubes the crew on the pads wait for, as [cube, face, ...] for each open face, up to `most`
 // cubes of each colour.
 function waitedFaces(st, most) {
@@ -650,9 +640,6 @@ function waitedFaces(st, most) {
   }
   return faces;
 }
-// A search that found nothing finds nothing again while the board and the crew waiting stay the
-// same (it does not depend on where the camera is), so that answer is kept, per kind of search.
-const missKey = (st, kind) => `${kind} ${st.rev} ${st.slots.map(s => (s && s.count > 0 && !(s.land > 0) ? s.color : -1)).join()}`;
 // The heights in pitch steps, nearest the camera's own first.
 function* heights(st, by) {
   yield st.pitch;
@@ -661,52 +648,38 @@ function* heights(st, by) {
     if (st.pitch - d >= 0) yield st.pitch - d;
   }
 }
-// For crew waiting with nothing in view: the camera height, in pitch steps and nearest its own,
-// from which a fair part (FACE_NEED points) of an open face of one of the cubes they wait for
-// shows, looking at that side from straight on or up to 36 degrees either way (from any side for a
-// top or an underside); -1 when none of every third height shows one. Up to SEEK_CUBES of each
-// colour's cubes are tried.
-function seekHeight(st) {
-  const miss = missKey(st, 'h');
-  if (st.seekMiss === miss) return -1;
-  const faces = waitedFaces(st, SEEK_CUBES);
-  const cams = new Map();
-  const cam = (y, u) => { const key = y * PITCH_STEPS + u; let c = cams.get(key); if (!c) cams.set(key, (c = camAt(st, y, u))); return c; };
-  for (const u of faces.length ? heights(st, SEEK_PITCH_STEP) : []) {
-    for (let q = 0; q < faces.length; q += 2) {
-      const i = faces[q], f = faces[q + 1];
-      for (let a = 0; a < (f < 4 ? 1 : 4); a++) {
-        const y0 = SIDE_YAW[f < 4 ? f : a];
-        for (const dy of SEEK_YAWS) if (faceShows(st, i, f, cam(turned(y0, dy), u), FACE_NEED)) return u;
-      }
-    }
-  }
-  st.seekMiss = miss;
-  return -1;
-}
-// After STALL with nothing flown: a sliver will do from now on (faceView()). If no cube the crew
-// wait for shows even a sliver from where the camera is, the camera swings round to the nearest
-// height, and the step of the turn, from which one does (it glides there on the screen in about a
-// fifth of a second, while the shot flies). Looked for among SWING_CUBES of each colour's cubes;
-// when none shows from anywhere, the view stays as it is.
-function swing(st) {
-  st.sliver = true;
-  for (const s of st.slots) if (s && s.count > 0 && !(s.land > 0) && target(st, s.color) >= 0) return;
-  const miss = missKey(st, 's');
-  if (st.swingMiss === miss) return;
+// The nearest view, [turn, height], from which an open face of a cube the crew wait for shows
+// with `need` of its points in clear sight; null when none does. Every other height is tried,
+// nearest first, and at each every other step of the turn, nearest first, for SWING_CUBES of each
+// colour's cubes. A search that found nothing finds nothing again while the board and the crew
+// waiting stay the same, so that answer is kept.
+function viewShowing(st, need) {
+  const miss = `${need} ${st.rev} ${st.slots.map(s => (s && s.count > 0 && !(s.land > 0) ? s.color : -1)).join()}`;
+  if (st.swingMiss === miss) return null;
   const faces = waitedFaces(st, SWING_CUBES);
-  const here = Math.floor(st.yaw / VIEW_STEP);
-  const n = YAW_STEPS / VIEW_STEP;
+  const here = Math.floor(st.yaw / VIEW_STEP), n = YAW_STEPS / VIEW_STEP;
   for (const u of faces.length ? heights(st, SWING_STEP) : []) {
     for (let k = 0; k < n; k += SWING_STEP) {
       const y = (((here + (k % 2 ? (k + 1) / 2 : -k / 2)) % n + n) % n) * VIEW_STEP + VIEW_STEP / 2;
       const C = camAt(st, y, u);
-      for (let q = 0; q < faces.length; q += 2) {
-        if (faceShows(st, faces[q], faces[q + 1], C, 1)) { st.yaw = y; st.pitch = u; st.seekH = u; return; }
-      }
+      for (let q = 0; q < faces.length; q += 2) if (faceShows(st, faces[q], faces[q + 1], C, need)) return [y, u];
     }
   }
   st.swingMiss = miss;
+  return null;
+}
+// Crew have waited SEEK ticks with nothing of theirs in view: the camera swings to the nearest view
+// that shows a fair part of a cube they wait for, else to one that shows a sliver (and a sliver
+// will do, faceView()); when none shows from anywhere, the view stays as it is.
+function swing(st) {
+  for (const s of st.slots) if (s && s.count > 0 && !(s.land > 0) && target(st, s.color) >= 0) return;
+  for (const need of [FACE_NEED, 1]) {
+    const v = viewShowing(st, need);
+    if (!v) continue;
+    st.yaw = v[0]; st.pitch = v[1]; st.seekH = v[1];
+    if (need === 1) st.sliver = true;
+    return;
+  }
 }
 
 // One tick: the turntable turns by st.spin, the shots due now land (in the order they left), crew
@@ -716,12 +689,8 @@ export function step(st) {
   st.tick++;
   st.yaw = turned(st.yaw, st.spin);
   if (st.spin) { // turning on its own: the camera looks for what the crew wait for (SEEK)
-    let want = st.home;
-    if (st.quiet >= SEEK) {
-      if (!(st.seekH >= -1)) st.seekH = seekHeight(st);
-      if (st.quiet === STALL) swing(st);
-      want = st.seekH >= 0 ? st.seekH : Math.floor((st.quiet - SEEK) / LOOK) % 2 ? BELOW : HIGH;
-    }
+    if (st.quiet === SEEK) swing(st);
+    const want = st.quiet >= SEEK && st.seekH >= 0 ? st.seekH : st.home;
     if (st.tick % SEEK_STEP === 0) st.pitch += Math.sign(want - st.pitch) * Math.min(SEEK_JUMP, Math.abs(want - st.pitch));
   }
   const landed = [];
