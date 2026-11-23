@@ -6,6 +6,7 @@ import { fileURLToPath } from 'node:url';
 import { makeBoard, cloneBoard, removeCube, deploy, fire, step, settle, launch, target, isJammed, isWon, canFire, canReach, purgeCleared, isExposed, freeSlot, FLIGHT, tickGame, advance, forecast, forecastKey, fates, busy, revealLone, checkOf, pace, Attempt, FAST,
   setView, seen, camPos, lookAt, pitchUnits, pitchRad, YAW_STEPS, START_YAW, START_PITCH, PITCH_STEPS, TURN, SEEK, STALL } from '../js/logic.js';
 import { pixels } from '../tools/sight.mjs';
+import { checkTraps } from '../tools/traps.mjs';
 import { LEVELS, buildLevel, dealLevel, levelPrint, rng } from '../js/levels.js';
 import { plan, greedy, greedyCheck, hastyCheck, hastyGreedy, lineHolds, playLine, onClock, earlyParks, forecastFirst, backtrack, forecastCheck, hastyForecastCheck, backtrackCheck, firingTime, curveMisses, GAPS, LAND, GREEDY_PLAYS, PARK_MIN } from '../tools/players.mjs';
 
@@ -279,13 +280,15 @@ test('the camera that swings for crew who wait looks from below too, under a par
 });
 
 test('every shot takes a cube that shows on the phone screen at the moment it leaves', () => {
-  // Plays Robot, Lighthouse and Castle, sending a line whose front crew member can shoot now, else
-  // any line once nothing moves, and draws the screen the rules look from (a phone held upright, at
-  // twice its size) at every shot: the cube shot at shows in it, never one hidden behind another part.
+  // Plays the teapot, the birdcage and the atom, sending a line whose front crew member can shoot
+  // now, else any line once nothing moves, and draws the screen the rules look from (a phone held
+  // upright, at twice its size) at every shot: the cube shot at shows in it, never one hidden behind
+  // another part (the cage's bars, the atom's rings).
   let shots = 0;
-  for (const n of [4, 8, 17]) {
+  const picked = ['teapot', 'birdcage', 'atom'].map(m => LEVELS.findIndex(d => d.model === m));
+  for (const n of picked) {
     const st = buildLevel(n).board, rand = rng(41 + n);
-    for (let guard = 0; guard < 30000 && shots < 120 * (1 + [4, 8, 17].indexOf(n)) && !isWon(st) && !isJammed(st); guard++) {
+    for (let guard = 0; guard < 30000 && shots < 120 * (1 + picked.indexOf(n)) && !isWon(st) && !isJammed(st); guard++) {
       if (freeSlot(st) >= 0) {
         const cols = st.columns.map((_, i) => i).filter(i => st.columns[i].length);
         const ready = cols.filter(i => target(st, st.columns[i][0].color) >= 0);
@@ -506,7 +509,7 @@ test('Robot: the legs and feet under its body can be hit from the start, and all
 });
 
 test('undo, a saved attempt and every send give back exactly the cubes that can be hit', () => {
-  for (const n of [LEVELS.findIndex(d => d.model === 'robot'), LEVELS.findIndex(d => d.model === 'castle')]) {
+  for (const n of [LEVELS.findIndex(d => d.model === 'robot'), LEVELS.findIndex(d => d.model === 'treehouse')]) {
     const L = buildLevel(n);
     const a = new Attempt(cloneBoard(L.board));
     assert.deepEqual(hitList(a.board), hittable(a.board), `level ${n + 1} at the start`);
@@ -886,8 +889,8 @@ test('the finishes-or-parks forecast says what really happens when that crew mem
   assert.ok(checked > 200 && parks > 20, `${checked} forecasts checked, ${parks} of them parks, ${strands} strand someone`);
 });
 
-test('level 19: crew the forecast says will park fill its three pads, and undo gets out of the jam', () => {
-  const L = buildLevel(18);
+test('the atom: crew the forecast says will park fill its three pads, and undo gets out of the jam', () => {
+  const L = buildLevel(LEVELS.findIndex(d => d.model === 'atom'));
   assert.equal(L.board.slots.length, 3);
   const a = new Attempt(L.board);
   // Send, 150 ms apart, a front the forecast says parks (when none does, one that finishes), until
@@ -983,5 +986,33 @@ test('the curve: no level much easier than the one before it, and undos that mov
   assert.deepEqual(steps, [], steps.join('; '));
   assert.ok(LEVELS.every(d => d.undos <= 6) && LEVELS.slice(0, 12).every(d => d.undos <= 3), 'at most 3 undos up to level 12, at most 6 after');
   const breathers = LEVELS.map((_, n) => n).filter(n => n > 0 && LEVELS[n].follow[0] > LEVELS[n - 1].follow[1]);
-  assert.deepEqual(breathers.map(n => LEVELS[n].name), ['Melon'], 'one breather, the melon');
+  assert.deepEqual(breathers.map(n => LEVELS[n].name), ['Lantern'], 'one breather, the lantern');
+});
+
+// The planned hard moments (Work item 9nov): every level whose crew are written out by hand keeps
+// one to three moments where a send that looks ready loses, and its written solution still wins.
+for (let n = 0; n < LEVELS.length; n++) {
+  const def = LEVELS[n];
+  if (!def.lines) continue;
+  test(`level ${n + 1} (${def.name}): its solution wins and each planned trap still loses`, () => {
+    assert.ok(def.solution && def.traps, 'a level written out by hand names its solution and its traps');
+    const moments = new Set(def.traps.map(t => t[0])).size;
+    assert.ok(moments >= 1 && moments <= 3, `${moments} moments with a trap; one to three`);
+    const misses = checkTraps(n);
+    assert.deepEqual(misses, [], misses.join('; '));
+  });
+}
+
+test('crew written out by hand are read as written, and a line that cannot be played is refused', () => {
+  const n = LEVELS.findIndex(d => d.lines);
+  const def = LEVELS[n];
+  const L = dealLevel(def);
+  assert.equal(L.board.columns.length, def.lines.length);
+  assert.deepEqual(L.board.columns.map(c => c.length), def.lines.map(l => l.split(',').length));
+  const [first, ...others] = def.lines;
+  const [, name, count] = /^\s*\??\s*([a-z]+)\s+(\d+)/.exec(first);
+  const tryLines = lines => () => dealLevel({ ...def, lines });
+  assert.throws(tryLines([first.replace(`${name} ${count}`, `${name} ${Number(count) + 10}`), ...others]), /pop \d+ cubes/, 'a colour that does not add up');
+  assert.throws(tryLines([first.replace(`${name} ${count}`, `nocolour ${count}`), ...others]), /not a colour/, 'a colour the sculpture lacks');
+  assert.throws(tryLines([`?${first.trim()}`, ...others]), /front of line 1 is hidden/, 'a hidden front');
 });

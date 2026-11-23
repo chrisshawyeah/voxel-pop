@@ -9,15 +9,18 @@
 //                                         deals the sculpture with those settings, deal after deal,
 //                                         and prints each one whose solution has one to three
 //                                         moments with a trap, written out as `lines` to copy
-//                                         into js/levels.js
+//                                         into js/levels.js; with --measure, only deals whose
+//                                         planned line holds and fires within 30 s, and those
+//                                         with traps measured as tools/difficulty.mjs does
 //
 // A trap [k, j]: after the first k sends of the solution (each followed by waiting until the pads
 // stop, as the planning player plays), sending line j instead loses whatever comes after, and
 // line j's front crew member has cubes of its colour on the outside, so it looks ready. The checks
 // look with every hidden crew member known, so a trap loses even for a player who could see them.
+import { pathToFileURL } from 'node:url';
 import { LEVELS, buildLevel, dealLevel, modelFor } from '../js/levels.js';
 import { cloneBoard, deploy, settle } from '../js/logic.js';
-import { plan } from './players.mjs';
+import { plan, lineHolds, firingTime, greedyCheck, hastyCheck, forecastCheck, backtrackCheck } from './players.mjs';
 
 const BUDGET = 30000;
 
@@ -81,14 +84,16 @@ export function linesOf(board, names) {
   return board.columns.map(col => col.map(s => `${s.hidden ? '?' : ''}${names[s.color]} ${s.count}`).join(', '));
 }
 
-const [cmd, arg, ...rest] = process.argv.slice(2);
+// The commands run only when this file is run, not when the tests import checkTraps.
+const main = process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href;
+const [cmd, arg, ...rest] = main ? process.argv.slice(2) : [];
 const opt = (name, dflt) => { const a = rest.find(x => x.startsWith(`--${name}=`)); return a ? a.slice(name.length + 3) : dflt; };
 if (cmd === 'check') {
   let bad = 0;
   LEVELS.forEach((def, n) => {
     if (!def.traps) return;
     const misses = checkTraps(n);
-    console.log(`${n + 1} ${def.name}: ${misses.length ? misses.join('; ') : `${def.traps.length} traps hold`}`);
+    console.log(`${n + 1} ${def.name}: ${misses.length ? misses.join('; ') : `${def.traps.length} ${def.traps.length === 1 ? "trap holds" : "traps hold"}`}`);
     bad += misses.length;
   });
   process.exitCode = bad ? 1 : 0;
@@ -103,13 +108,24 @@ if (cmd === 'check') {
     mix: Number(opt('mix', 0.2)), flip: Number(opt('flip', 0.6)),
   };
   const from = Number(opt('from', 0)), tries = Number(opt('tries', 30));
+  const measure = rest.includes('--measure');
   const names = modelFor(def).names;
   for (let deal = from; deal < from + tries; deal++) {
     const L = dealLevel({ ...def, deal });
-    const p = plan(L.board, { budget: 60000 });
-    if (!p.win) { console.log(JSON.stringify({ deal, win: p.win })); continue; }
+    // With --measure, only a deal the level tests would take: the planning player's line holds with
+    // the sends overlapping, and fires within 30 seconds; then, with one to three trap moments,
+    // the measures tools/difficulty.mjs prints.
+    const p = plan(L.board, measure ? { holds: line => lineHolds(L.board, line) } : { budget: 60000 });
+    if (!p.win || (measure && !p.holds)) { console.log(JSON.stringify({ deal, win: p.win, holds: p.holds })); continue; }
+    const fire = measure ? firingTime(L.board, p.line) : null;
+    if (measure && !(fire <= 30)) { console.log(JSON.stringify({ deal, win: true, fire })); continue; }
     const traps = findTraps(L.board, p.line);
     const moments = new Set(traps.map(t => t[0])).size;
-    console.log(JSON.stringify({ deal, win: true, moments, traps, solution: p.line, lines: linesOf(L.board, names), pads: def.pads, crew: L.shooters }));
+    const out = { deal, win: true, moments, traps, solution: p.line, lines: linesOf(L.board, names), pads: def.pads, crew: L.shooters, fire };
+    if (measure && moments >= 1 && moments <= 3) {
+      const fc = forecastCheck(L.board), back = backtrackCheck(L.board);
+      Object.assign(out, { greedy: greedyCheck(L.board), hasty: hastyCheck(L.board), follow: fc.rate, undos: back.undos, backRate: back.rate });
+    }
+    console.log(JSON.stringify(out));
   }
 }
