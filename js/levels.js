@@ -35,6 +35,14 @@ import { makeBoard, cloneBoard, removeCube, revealLone, START_SLOTS, RULES, FLIG
 //   deal    which deal of these settings is played. Picked by `node tools/pick-deals.mjs`, which
 //           tries deals until a careful player wins and the greedy, follow and undos measures
 //           land where the line says.
+//   lines   (instead of crew, hidden, mix, flip and deal) the crew written out by hand, one string
+//           per line from the front: 'blue 40, ?green 20, red 30', a colour of the sculpture and
+//           how many cubes that crew member pops, a "?" in front of one that waits hidden until it
+//           reaches the front. Each colour's crew must add up to its cubes exactly.
+//   solution  (with lines) a winning order of sends, the lines by number from 0 at the left.
+//   traps   (with lines) the planned hard moments: [k, j] says that after the first k sends of
+//           the solution, sending line j instead loses, though its front crew member could shoot
+//           right away. The tests prove every one (tools/traps.mjs finds and checks them).
 export const LEVELS = [
   { name: 'Toadstool', model: 'mushroom', cols: 3, pads: 5, crew: [40, 60], hidden: 0, mix: 0, flip: 0, greedy: [95, 100], follow: [95, 100], undos: 0, deal: 0 },
   { name: 'Bath Duck', model: 'duck', cols: 4, pads: 3, crew: [50, 80], hidden: 0, mix: 0.1, flip: 0.5, greedy: [85, 95], follow: [95, 100], undos: 0, opening: 'park', deal: 12 },
@@ -110,8 +118,46 @@ function split(total, [lo, hi], rand) {
   return sizes;
 }
 
-// Deals one level exactly as its settings and `deal` number say, with no search.
+// Reads crew written out by hand (a level's `lines`, see LEVELS above) into the lines of a board.
+// Throws, naming the level, when a colour is not the sculpture's or its crew do not add up to its
+// cubes.
+export function readLines(def, model, remaining) {
+  const where = `${def.name}: `;
+  const sums = new Array(model.names.length).fill(0);
+  let id = 0;
+  const columns = def.lines.map((text, ci) => text.split(',').map(part => {
+    const m = /^\s*(\?)?\s*([a-z]+)\s+(\d+)\s*$/.exec(part);
+    if (!m) throw new Error(`${where}cannot read "${part.trim()}" in line ${ci + 1}`);
+    const color = model.names.indexOf(m[2]);
+    if (color < 0) throw new Error(`${where}${m[2]} is not a colour of the ${def.model}`);
+    const count = Number(m[3]);
+    if (!(count > 0)) throw new Error(`${where}a crew member of ${m[2]} pops no cubes`);
+    sums[color] += count;
+    return { id: id++, color, count, hidden: !!m[1], home: ci };
+  }));
+  model.names.forEach((name, c) => {
+    if (sums[c] !== remaining[c]) throw new Error(`${where}the ${name} crew pop ${sums[c]} cubes, but the ${def.model} has ${remaining[c]}`);
+  });
+  columns.forEach((col, ci) => col.forEach((s, k) => {
+    if (s.hidden && k === 0) throw new Error(`${where}the front of line ${ci + 1} is hidden`);
+    if (s.hidden && col[k - 1].hidden) throw new Error(`${where}two hidden crew in a row in line ${ci + 1}`);
+  }));
+  return columns;
+}
+
+// Deals one level exactly as its settings and `deal` number say, with no search; a level whose
+// crew are written out by hand (`lines`) is read as written.
 export function dealLevel(def) {
+  if (def.lines) {
+    const { model, base } = sculpture(def.model);
+    const columns = readLines(def, model, base.remaining);
+    const board = cloneBoard(base);
+    board.slots = Array(padsFor(def)).fill(null);
+    board.columns = columns;
+    revealLone(board);
+    const crew = columns.reduce((n, col) => n + col.length, 0);
+    return { def, model, board, shooters: crew, hidden: columns.flat().filter(s => s.hidden).length };
+  }
   const { model, base, depth } = sculpture(def.model);
   const rand = rng(seedOf(`${def.model}:${def.deal}`));
   // The crew: each colour's cubes in the order they open up (shallow first, then the targeting

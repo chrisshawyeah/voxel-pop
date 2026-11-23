@@ -551,33 +551,35 @@ function birdcage() {
   }
   hoop(s, C, 23, C, 'z', 1.4, 0.55, 'charcoal', (x, y) => y >= 22);
   rod(s, [C, 21, C], [C, 22, C], 0.6, 'charcoal');
-  rod(s, [C - R, 5, C], [C + R, 5, C], 0.6, 'brown'); // the perch
-  ball(s, C, 8, C - 0.5, 2.3, 2.4, 3, 'blue');
-  ball(s, C, 11, C + 2, 1.9, 1.9, 1.9, 'blue');
-  s.paint((x, y, z, cur) => cur === 'blue' && y <= 8 && z >= C, 'white'); // the breast
-  rod(s, [C, 11, C + 3.5], [C, 10.5, C + 5], 0.6, 'orange');
-  for (const ex of [C - 1.5, C + 1.5]) s.set(ex, 12, C + 3, 'charcoal');
-  rod(s, [C, 8, C - 3], [C, 6, C - 6], 1, 'teal'); // the tail
-  s.bands(['green', 'red'], (x, y, z, cur) => cur === 'blue' || cur === 'white');
+  rod(s, [C - R, 4, C], [C + R, 4, C], 0.8, 'brown'); // the perch
+  ball(s, C, 8, C - 0.5, 3.2, 3.4, 4, 'blue');
+  ball(s, C, 12.5, C + 2.5, 2.5, 2.5, 2.5, 'blue');
+  s.paint((x, y, z, cur) => cur === 'blue' && y <= 9 && z >= C + 1, 'white'); // the breast
+  rod(s, [C, 12.5, C + 4.5], [C, 12, C + 6.5], 0.7, 'orange');
+  for (const ex of [C - 1.5, C + 1.5]) s.set(ex, 13, C + 4.5, 'charcoal');
+  rod(s, [C, 8, C - 4], [C, 5, C - 7], 1.2, 'teal'); // the tail
+  box(s, C + 3, C + 5, 1, 2, C - 5, C - 3, 'red'); // a seed cup
+  s.bands(['yellow', 'red', 'green'], (x, y, z, cur) => cur === 'blue' || cur === 'white');
   return s.done();
 }
 
 // A lantern: glass walls in a dark frame, open panes high up, a candle inside, a roof with eaves.
 function lantern() {
   const s = new Sculpt(15, 25, 15), lo = 2, hi = 12, M = 7;
-  box(s, 1, 13, 1, 2, 1, 13, 'brown');
-  for (const [fx, fz] of [[1, 1], [1, 13], [13, 1], [13, 13]]) box(s, fx, fx, 0, 0, fz, fz, 'charcoal');
+  box(s, 1, 13, 0, 2, 1, 13, 'brown');
   const wall = (x, z) => x >= lo && x <= hi && z >= lo && z <= hi && (x === lo || x === hi || z === lo || z === hi);
   s.fill((x, y, z) => y >= 3 && y <= 14 && wall(x, z), 'yellow');
   s.paint((x, y, z) => y >= 3 && y <= 14 && wall(x, z) && (((x === lo || x === hi) && (z === lo || z === hi)) || y === 3 || y === 9 || y === 14 || x === M || z === M), 'charcoal');
   const pane = v => (v >= 4 && v <= 5) || (v >= 9 && v <= 10);
   s.fill((x, y, z) => y >= 10 && y <= 13 && (((z === lo || z === hi) && pane(x)) || ((x === lo || x === hi) && pane(z))), null);
-  s.fill((x, y, z) => y >= 3 && y <= 8 && Math.hypot(x - M, z - M) <= 1.6, 'white'); // the candle
+  s.fill((x, y, z) => y >= 3 && y <= 8 && Math.hypot(x - M, z - M) <= 2.6, 'white'); // the candle
   ball(s, M, 10.5, M, 1.2, 2, 1.2, 'orange'); // its flame
   s.fill((x, y, z) => y >= 15 && y <= 19 && ring2(x, z, M, M) <= 7 - (y - 15) * 1.5, 'red');
   s.set(M, 20, M, 'charcoal');
   hoop(s, M, 22, M, 'z', 2, 0.55, 'charcoal', (x, y) => y >= 21);
-  s.bands(['green', 'blue'], (x, y, z, cur) => cur === 'white' || cur === 'brown');
+  s.bands(['red', 'yellow'], (x, y, z, cur) => cur === 'white');
+  s.bands(['charcoal', 'green'], (x, y, z, cur) => cur === 'brown');
+  s.bands(['yellow', 'white'], (x, y, z, cur) => cur === 'red');
   return s.done();
 }
 
@@ -585,7 +587,7 @@ function lantern() {
 // long tentacles hanging below.
 function jellyfish() {
   const s = new Sculpt(19, 20, 19), C = 9;
-  s.fill((x, y, z) => { const d = Math.hypot(x - C, (y - 9) * 1.15, z - C); return y >= 9 && d <= 8.4 && d >= 5.6; }, 'pink');
+  s.fill((x, y, z) => { const d = Math.hypot(x - C, (y - 9) * 1.15, z - C); return y >= 9 && d <= 8.6 && d >= 4.8; }, 'pink');
   s.fill((x, y, z) => y === 8 && Math.abs(Math.hypot(x - C, z - C) - 7) <= 0.9 && Math.floor((Math.atan2(z - C, x - C) + Math.PI) / (Math.PI / 8)) % 2 === 0, 'pink');
   rod(s, [C, 12, C], [C, 15, C], 0.8, 'orange');
   hoop(s, C, 12, C, 'y', 2.4, 1.1, 'orange');
@@ -599,7 +601,7 @@ function jellyfish() {
     for (let y = 8; y >= 1; y--) { const r = 6.8 - (8 - y) * 0.2 + Math.sin(y + k) * 0.5; pts.push([C + r * Math.cos(a), y, C + r * Math.sin(a)]); }
     path(s, pts, 0.55, 'teal');
   }
-  s.bands(['blue'], (x, y, z, cur) => cur === 'pink');
+  s.bands(['orange', 'blue'], (x, y, z, cur) => cur === 'pink');
   return s.done();
 }
 
@@ -630,7 +632,7 @@ function pagoda() {
     s.fill((x, y, z) => y === y0 && ring2(x, z, C, C) <= w, 'brown');
     s.fill((x, y, z) => y > y0 && y <= y0 + 3 && ring2(x, z, C, C) === w, 'white');
     s.fill((x, y, z) => y >= y0 + 2 && y <= y0 + 3 && ring2(x, z, C, C) === w && Math.min(Math.abs(x - C), Math.abs(z - C)) <= 1, null);
-    box(s, C - 1, C + 1, y0 + 1, y0 + 3, C - 1, C + 1, 'yellow');
+    box(s, C - w + 2, C + w - 2, y0 + 1, y0 + 3, C - w + 2, C + w - 2, 'yellow');
     s.fill((x, y, z) => y === y0 + 4 && ring2(x, z, C, C) <= e, 'red');
     s.fill((x, y, z) => y === y0 + 5 && ring2(x, z, C, C) <= e - 2, 'red');
     s.fill((x, y, z) => y === y0 + 6 && ring2(x, z, C, C) <= w - 1, 'red');
@@ -638,7 +640,8 @@ function pagoda() {
   }
   rod(s, [C, 21, C], [C, 23, C], 0.7, 'charcoal');
   s.set(C, 24, C, 'yellow');
-  s.bands(['orange'], (x, y, z, cur) => cur === 'yellow');
+  s.bands(['red', 'orange'], (x, y, z, cur) => cur === 'yellow');
+  s.bands(['yellow'], (x, y, z, cur) => cur === 'red');
   return s.done();
 }
 
@@ -651,21 +654,21 @@ function teapot() {
   ball(s, cx, 13, cz, 1.2, 1.2, 1.2, 'yellow');
   path(s, [[15, 4, cz], [18, 6, cz], [20, 9, cz], [21.5, 10, cz]], 1.1, 'blue');
   hoop(s, 3.8, 7, cz, 'z', 3.4, 0.8, 'blue', x => x <= 6);
-  s.bands(['teal', 'brown', 'orange']);
+  s.bands(['teal', 'blue', 'brown', 'orange']);
   return s.done();
 }
 
 // An atom: a nucleus of red and green, caged by three rings, each with its electron.
 function atom() {
   const s = new Sculpt(23, 23, 23), C = 11;
-  ball(s, C, C, C, 3.6, 3.6, 3.6, 'red');
+  ball(s, C, C, C, 5.2, 5.2, 5.2, 'red');
   s.paint((x, y, z) => hash(x, y, z) < 0.5, 'green');
   hoop(s, C, C, C, 'y', 9, 0.7, 'blue');
   hoop(s, C, C, C, 'x', 9, 0.7, 'yellow');
   hoop(s, C, C, C, 'z', 9, 0.7, 'teal');
   const e = 9 / Math.SQRT2;
   for (const [x, y, z] of [[C + e, C, C + e], [C, C + e, C - e], [C - e, C - e, C]]) ball(s, x, y, z, 1.4, 1.4, 1.4, 'white');
-  s.bands(['orange', 'charcoal'], (x, y, z, cur) => cur === 'red' || cur === 'green');
+  s.bands(['yellow', 'blue', 'orange'], (x, y, z, cur) => cur === 'red' || cur === 'green');
   return s.done();
 }
 
@@ -689,7 +692,7 @@ function treehouse() {
   ball(s, C + 5, 20, C - 3, 3, 2.5, 3, 'green');
   for (const lx of [C - 1, C + 1]) rod(s, [lx, 0, C + 8.5], [lx, 8, C + 8.5], 0.5, 'grey');
   for (let y = 1; y <= 7; y += 2) rod(s, [C - 1, y, C + 8.5], [C + 1, y, C + 8.5], 0.5, 'grey');
-  s.bands(['teal', 'lilac'], (x, y, z, cur) => cur === 'green');
+  s.bands(['teal', 'orange', 'lilac'], (x, y, z, cur) => cur === 'green');
   s.bands(['charcoal'], (x, y, z, cur) => cur === 'brown');
   return s.done();
 }
@@ -705,7 +708,7 @@ function hourglass() {
   s.fill((x, y, z) => y >= 12 && y <= 16 && Math.hypot(x - C, z - C) <= r(y) - 1, 'yellow');
   s.fill((x, y, z) => y >= 7 && y <= 11 && x === C && z === C, 'yellow');
   s.fill((x, y, z) => y >= 1 && y <= 6 && Math.hypot(x - C, z - C) <= (6.5 - y) * 0.9, 'yellow');
-  s.bands(['orange', 'red'], (x, y, z, cur) => cur === 'yellow');
+  s.bands(['orange', 'teal', 'red'], (x, y, z, cur) => cur === 'yellow');
   return s.done();
 }
 
@@ -723,7 +726,7 @@ function octopus() {
     path(s, pts, j => 1.4 - 0.08 * j, 'purple');
   }
   s.paint((x, y, z, cur) => cur === 'purple' && y <= 6 && !s.get(x, y - 1, z) && hash(x, y, z) < 0.6, 'pink');
-  s.bands(['red', 'yellow'], (x, y, z, cur) => y >= 6 && cur === 'purple');
+  s.bands(['pink', 'red', 'yellow'], (x, y, z, cur) => y >= 6 && cur === 'purple');
   return s.done();
 }
 
@@ -731,12 +734,11 @@ function octopus() {
 function windmill() {
   const s = new Sculpt(23, 26, 17), cx = 11, cz = 7, hy = 15;
   s.fill((x, y, z) => y <= 16 && Math.hypot(x - cx, z - cz) <= 5 - y * 0.12, 'white');
-  s.fill((x, y, z) => y >= 1 && y <= 15 && Math.hypot(x - cx, z - cz) <= 3.8 - y * 0.12, null);
-  s.fill((x, y, z) => [6, 7, 11, 12].includes(y) && Math.abs(x - cx) <= 1 && Math.abs(z - cz) >= 2, null);
-  s.fill((x, y, z) => (y === 9 || y === 10) && Math.abs(z - cz) <= 1 && Math.abs(x - cx) >= 2, null);
-  s.fill((x, y, z) => y <= 2 && Math.abs(x - cx) <= 1 && z > cz, null); // the doorway
-  rod(s, [cx, 1, cz], [cx, 16, cz], 0.7, 'grey'); // the shaft inside
-  hoop(s, cx, 8, cz, 'y', 1.8, 0.6, 'yellow');
+  const r0 = y => 5 - y * 0.12;
+  s.fill((x, y, z) => [6, 7, 11, 12].includes(y) && Math.abs(x - cx) <= 1 && Math.abs(z - cz) >= r0(y) - 1.6, null); // windows
+  s.fill((x, y, z) => (y === 9 || y === 10) && Math.abs(z - cz) <= 1 && Math.abs(x - cx) >= r0(y) - 1.6, null);
+  s.fill((x, y, z) => y <= 2 && Math.abs(x - cx) <= 1 && z - cz >= r0(y) - 2, null); // the doorway
+  s.paint((x, y, z) => y === 4 || y === 14, 'grey'); // bands of stone round the tower
   ball(s, cx, 17, cz, 5, 4, 5, 'red', (x, y) => y >= 17);
   rod(s, [cx, hy, cz + 3], [cx, hy, cz + 8], 0.7, 'charcoal');
   for (let k = 0; k < 4; k++) {
@@ -751,7 +753,7 @@ function windmill() {
       return (x + y) % 3 !== 0 ? 'orange' : undefined; // its cloth, a lattice you can see through
     });
   }
-  s.bands(['grey', 'green'], (x, y, z, cur) => cur === 'white' || cur === 'red');
+  s.bands(['grey', 'yellow', 'green'], (x, y, z, cur) => cur === 'white' || cur === 'red' || cur === 'grey');
   return s.done();
 }
 
@@ -759,7 +761,7 @@ function windmill() {
 // and a docking pod underneath.
 function station() {
   const s = new Sculpt(25, 19, 25), C = 12, Y = 9;
-  s.fill((x, y, z) => y >= 3 && y <= 15 && Math.hypot(x - C, z - C) <= 2.6, 'grey');
+  s.fill((x, y, z) => y >= 3 && y <= 15 && Math.hypot(x - C, z - C) <= 3.6, 'grey');
   hoop(s, C, Y, C, 'y', 10, 1.6, 'white');
   s.paint((x, y, z, cur) => cur === 'white' && y === Y && Math.hypot(x - C, z - C) > 10.8 && Math.floor((Math.atan2(z - C, x - C) + Math.PI) / (Math.PI / 12)) % 2 === 0, 'charcoal');
   for (let k = 0; k < 4; k++) {
@@ -769,7 +771,8 @@ function station() {
   rod(s, [C, 15, C], [C, 18, C], 0.6, 'grey');
   s.fill((x, y, z) => y === 17 && Math.abs(z - C) <= 2 && Math.abs(x - C) >= 2 && Math.abs(x - C) <= 10 && (x % 2 === 0 || Math.abs(z - C) === 2), 'blue');
   ball(s, C, 1.5, C, 2, 1.6, 2, 'orange');
-  s.bands(['yellow', 'green'], (x, y, z, cur) => cur === 'grey' || cur === 'white');
+  s.bands(['orange', 'blue', 'yellow'], (x, y, z, cur) => cur === 'grey');
+  s.bands(['yellow'], (x, y, z, cur) => cur === 'white');
   return s.done();
 }
 

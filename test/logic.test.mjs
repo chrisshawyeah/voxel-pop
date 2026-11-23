@@ -85,8 +85,8 @@ test('air sealed inside a hollow does not open its walls until the hollow is ope
 });
 
 test('a shot takes its cube when it leaves, and opens what is behind it only when it lands', () => {
-  const st = makeBoard(covered(2, 1)); // green sealed in by five red
-  st.slots = [crew(0, 0, 5), crew(1, 1, 1)];
+  const st = makeBoard(covered(2, 1)); // green sealed in by six red
+  st.slots = [crew(0, 0, 6), crew(1, 1, 1)];
   const first = step(st);
   assert.deepEqual(first.shots.map(s => s.cell), [LID], 'red fires at its highest cube, the lid; green has nothing yet');
   assert.equal(st.cells[LID], 1, 'the lid is still there while the shot flies');
@@ -414,12 +414,16 @@ function sendAndWatch(st, ci) {
   if (!d) return null;
   const id = d.shooter.id;
   const others = a.board.slots.filter(x => x && x.id !== id);
-  let mine = null;
+  // Watched until nothing moves, or nothing has fired or landed for twice STALL ticks (a crew
+  // member whose cubes are on the outside but in sight from no view waits for good, as the rules
+  // and the forecast count it).
+  let mine = null, quiet = 0;
   for (;;) {
     const s = a.board.slots.find(x => x && x.id === id);
     if (!mine && !s) mine = { finishes: true, left: 0 };
-    if (!busy(a.board)) { mine = mine || { finishes: false, left: s.count }; break; }
-    tickGame(a.board);
+    if (!busy(a.board) || quiet > 2 * STALL) { mine = mine || { finishes: false, left: s.count }; break; }
+    const r = tickGame(a.board);
+    quiet = r.shots.length || r.landed.length ? 0 : quiet + 1;
   }
   mine.strands = others.filter(x => finished.has(x.id) && a.board.slots.includes(x)).map(x => ({ id: x.id, color: x.color, left: x.count }));
   return mine;
@@ -478,7 +482,7 @@ test('Robot: the legs and feet under its body can be hit from the start, and all
   // into sight as the cubes in front of them go.
   assert.equal(legs.length, 96);
   assert.ok(legsOpen.length >= 60, 'most grey leg cubes');
-  assert.equal(feet.length, 72);
+  assert.equal(feet.length, 92);
   assert.ok(feetOpen.length >= 48, 'most charcoal foot cubes');
   const underBody = legsOpen.filter(i => y(i) === 5 && m.cells[i + m.sx] && m.cells[i + m.sx] !== grey + 1);
   assert.ok(underBody.length >= 10, `${underBody.length} leg cubes with the body right on top of them can be hit`);
@@ -662,13 +666,13 @@ test('a "?" stays a "?" only while there is more than one crew it could be', () 
 });
 
 test('the forecast says which crew on the pads a send strands, before it is sent', () => {
-  // Two red cubes open at two corners and a third sealed in under five green. Red 2 sent with nobody
+  // Two red cubes open at two corners and a third sealed in by six green. Red 2 sent with nobody
   // after it finishes; red 1 sent just after it also finishes, but the two then share the open cubes
   // and red 2 is left with one: the forecast for red 1 says so before the send ("finishes; strands
   // red 1"), and red 2's pad shows it once red 1 has gone.
-  const st = makeBoard(grid(3, 2, 3, [[1, 0, 1, 1], [1, 1, 1, 2], [0, 0, 1, 2], [2, 0, 1, 2], [1, 0, 0, 2], [1, 0, 2, 2], [0, 0, 0, 1], [2, 0, 2, 1]]));
+  const st = makeBoard(grid(3, 3, 3, [[1, 1, 1, 1], [1, 2, 1, 2], [0, 1, 1, 2], [2, 1, 1, 2], [1, 1, 0, 2], [1, 1, 2, 2], [1, 0, 1, 2], [0, 1, 0, 1], [2, 1, 2, 1]]));
   st.slots = [null, null, null];
-  st.columns = [[crew(0, 0, 2)], [crew(1, 0, 1)], [crew(2, 1, 5)]];
+  st.columns = [[crew(0, 0, 2)], [crew(1, 0, 1)], [crew(2, 1, 6)]];
   assert.deepEqual(forecast(st, 0, LAND), { finishes: true, left: 0, strands: [] });
   deploy(st, 0, LAND);
   assert.deepEqual([...fates(st)], [[0, 0]], 'red 2 finishes if no more crew are sent');
@@ -692,10 +696,10 @@ test('the forecast follows the clock while a shot is only flying', () => {
   // stranded (the other red waits on blue, whose crew waits in a line). Sent from tick 6, it lands too
   // late and parks. Between, no shot leaves or lands and nobody lands: only the clock tells the two
   // forecasts apart.
-  const blue = [[0, 0, 1], [2, 0, 1], [1, 0, 0], [1, 0, 2], [0, 0, 3], [2, 0, 3], [1, 0, 4], [1, 1, 3]].map(([x, y, z]) => [x, y, z, 3]);
-  const st = makeBoard(grid(3, 2, 5, [[1, 0, 1, 1], [1, 1, 1, 2], [1, 0, 3, 1], ...blue]));
+  const blue = [[0, 1, 1], [2, 1, 1], [1, 1, 0], [1, 1, 2], [0, 1, 3], [2, 1, 3], [1, 1, 4], [1, 2, 3], [1, 0, 1], [1, 0, 3]].map(([x, y, z]) => [x, y, z, 3]);
+  const st = makeBoard(grid(3, 3, 5, [[1, 1, 1, 1], [1, 2, 1, 2], [1, 1, 3, 1], ...blue]));
   st.slots = [null, crew(10, 0, 1), crew(11, 1, 1)];
-  st.columns = [[crew(0, 0, 1)], [crew(1, 2, 8)]];
+  st.columns = [[crew(0, 0, 1)], [crew(1, 2, 10)]];
   const seen = [];
   for (let t = 0; t <= 9; t++) {
     const f = forecast(st, 0, LAND);
@@ -708,17 +712,17 @@ test('the forecast follows the clock while a shot is only flying', () => {
 });
 
 test('the hasty greedy player loses what the waiting one wins, but only when it rushes', () => {
-  // One red cube open at a corner, and two red cubes side by side sealed in under eight green. Red 2,
-  // red 1 and green 8, two pads. The crew sent first lands and fires at the one open red on tick 5.
+  // One red cube open at a corner, and two red cubes side by side sealed in by ten green. Red 2,
+  // red 1 and green 10, two pads. The crew sent first lands and fires at the one open red on tick 5.
   // A tap on the other red before that (33 ms later, or 150 ms later, which falls between ticks four
   // and five) sends it while that red still looks open: if red 2 went first, it then sleeps with 1
   // left and red 1 with 1, and green cannot go up when both pads hold a sleeper (if red 1 went first
   // it finishes and frees its pad; if green went first or second, it opens the reds). 200 ms apart,
   // the first shot has already taken the open red, so only green looks ready.
-  const green = [[1, 1, 1], [2, 1, 1], [0, 0, 1], [3, 0, 1], [1, 0, 0], [2, 0, 0], [1, 0, 2], [2, 0, 2]].map(([x, y, z]) => [x, y, z, 2]);
-  const st = makeBoard(grid(4, 2, 3, [[0, 0, 0, 1], [1, 0, 1, 1], [2, 0, 1, 1], ...green]));
+  const green = [[1, 2, 1], [2, 2, 1], [0, 1, 1], [3, 1, 1], [1, 1, 0], [2, 1, 0], [1, 1, 2], [2, 1, 2], [1, 0, 1], [2, 0, 1]].map(([x, y, z]) => [x, y, z, 2]);
+  const st = makeBoard(grid(4, 3, 3, [[0, 1, 0, 1], [1, 1, 1, 1], [2, 1, 1, 1], ...green]));
   st.slots = [null, null];
-  st.columns = [[crew(0, 0, 2)], [crew(1, 0, 1)], [crew(2, 1, 8)]];
+  st.columns = [[crew(0, 0, 2)], [crew(1, 0, 1)], [crew(2, 1, 10)]];
   // Red 2, then red 1 150 ms later: sent on ticks 0 and 4, before red 2's first shot; out of room at tick 14.
   const line = [0, 1, 2], at = [];
   const lost = onClock(st, 150, b => (at.length < line.length ? line[at.push(b.tick) - 1] : -1));
@@ -911,11 +915,11 @@ test('level 19: crew the forecast says will park fill its three pads, and undo g
 });
 
 test('playLine sends a line with the sends overlapping in time, and says when it loses', () => {
-  // A green cube sealed in under five red. Red first wins whatever the gap between sends; green
-  // first on a board with one pad parks green on it, and that is out of room.
+  // A green cube sealed in by six red. Red first wins whatever the gap between sends; green first
+  // on a board with one pad parks green on it, and that is out of room.
   const st = makeBoard(covered(2, 1));
   st.slots = [null, null];
-  st.columns = [[crew(0, 0, 3), crew(1, 0, 2)], [crew(2, 1, 1)]];
+  st.columns = [[crew(0, 0, 3), crew(1, 0, 3)], [crew(2, 1, 1)]];
   for (const gap of GAPS) assert.equal(playLine(st, [0, 0, 1], gap), true, `gap ${gap}`);
   st.slots = [null];
   assert.equal(playLine(st, [1, 0, 0], 0), false);
