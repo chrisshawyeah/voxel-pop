@@ -3,11 +3,12 @@
 A cube-popping puzzle. A sculpture made of coloured cubes turns in the middle. Tap the front
 crew member of a line to send it up to a launch pad, where it pops cubes of its colour until
 its number runs out. A crew member hits only cubes you can see: a cube with a face on the open
-air around the sculpture, turned to the camera, with nothing of the sculpture or the turntable
+air around the sculpture, turned to the camera, with no other cube
 between some part of that face and the camera, whether straight on, at a slant into a notch, under
 a part that sticks out, or from below. The cubes stand flush, so nothing behind them shows
-through. The sculpture turns on its turntable, so its sides come round in turn; drag it to turn it
-yourself, and drag up or down to tilt the camera, from below the turntable to almost straight
+through. The sculpture floats in the air, with nothing under it, and turns, so its sides come
+round in turn and its underside can be hit when you look from below; drag it to turn it
+yourself, and drag up or down to tilt the camera, from below it to almost straight
 down. Crew who have waited a while with nothing of theirs in
 view make the camera look higher, then lower (into a pit, under a part that sticks out); only
 after about 17 seconds of that may a shot take a cube out of sight. So the sculpture is eaten
@@ -116,7 +117,7 @@ Play: https://chrisshawyeah.github.io/voxel-pop/
   address follows the level being played instead.
 - Drag the sculpture sideways to turn it all the way round, up or down to tilt the camera from below
   it to almost straight above. A flick keeps turning a
-  little; the turntable stays still for a moment after you let go, then takes up its own turn
+  little; the sculpture stays still for a moment after you let go, then takes up its own turn
   again. While you hold it the crew aim at what you see, and a saved attempt keeps every turn, so
   it comes back to the same cubes.
 - The crew buttons work with a tap, a click, or Tab then Enter or Space.
@@ -142,7 +143,7 @@ No build step and nothing to install. Every file is plain JavaScript the browser
 | The look of the crew, pads, top bar and short-window layout | `css/game.css` |
 | Sounds | `js/audio.js` (every sound is made in code). Ordinary pops are soft and at most about 9 a second (`POP_GAP`); the bright rising notes are for a crew member finishing, a colour cleared and a win. |
 | The 3D look: cubes, lights, camera framing, chips, puffs, the build at a level's start | `js/render.js` |
-| Turning and tilting by hand | the view section of `js/main.js` (`TURN_PX`, `TILT_PX`, `FLING`, `REST`); the turntable's own turn, the camera's range and how long crew wait before the camera looks around are `TURN`, `PITCH_MIN`/`PITCH_MAX`, `SEEK`, `LOOK` and `STALL` in `js/logic.js` |
+| Turning and tilting by hand | the view section of `js/main.js` (`TURN_PX`, `TILT_PX`, `FLING`, `REST`); the sculpture's own turn, the camera's range and how long crew wait before the camera looks around are `TURN`, `PITCH_MIN`/`PITCH_MAX`, `SEEK`, `LOOK` and `STALL` in `js/logic.js` |
 
 To try a change on your own computer, serve the folder and open it (the page loads modules,
 so opening `index.html` straight from the disk does not work):

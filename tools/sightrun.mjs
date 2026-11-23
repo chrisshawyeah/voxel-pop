@@ -6,16 +6,14 @@ import { pixels, facePixels } from './sight.mjs';
 import { rng } from '../js/levels.js';
 
 const FOV = 14;
+// Where the screen's camera is for a window `aspect` wide for its height (js/render.js frames it
+// with the rules' own camBack, looking at the rules' lookAt).
 function cam(st, yawU, pitchU, aspect) {
   const p = R.pitchRad(pitchU), sp = Math.sin(p), cp = Math.cos(p);
   const a = R.yawRad(yawU);
-  const top = st.topY, rad = st.tableR, reachR = st.reachR;
-  const ty = -0.6 + (top + 0.6) * 0.46;
-  const tan = Math.tan((FOV * Math.PI) / 360), tanUp = tan * 0.92, tanDown = tan * 0.74, tanH = tan * aspect * 0.9;
-  let d = 0;
-  const fit = (x, y, z) => { const dy = y - ty, depth = dy * sp + z * cp, up = dy * cp - z * sp; d = Math.max(d, depth + Math.abs(x) / tanH, depth + Math.abs(up) / (up > 0 ? tanUp : tanDown)); };
-  for (let k = 0; k < 24; k++) { const t = (k / 24) * Math.PI * 2, c = Math.cos(t), s = Math.sin(t); fit(c * rad, -0.6, s * rad); fit(c * rad, 0, s * rad); fit(c * reachR, top, s * reachR); }
-  return { pos: [st.sx / 2 - cp * d * Math.sin(a), ty + sp * d, st.sz / 2 + cp * d * Math.cos(a)], at: [st.sx / 2, ty, st.sz / 2] };
+  const at = R.lookAt(st);
+  const d = R.camBack(FOV, aspect, st.topY, st.reachR, p);
+  return { pos: [at[0] - cp * d * Math.sin(a), at[1] + sp * d, at[2] + cp * d * Math.cos(a)], at };
 }
 
 const levels = process.argv[2] ? process.argv[2].split(',').map(Number) : LEVELS.map((_, k) => k);

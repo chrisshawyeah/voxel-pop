@@ -4,7 +4,7 @@ import { readFileSync } from 'node:fs';
 import { spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import { makeBoard, cloneBoard, removeCube, deploy, fire, step, settle, launch, target, isJammed, isWon, canFire, canReach, purgeCleared, isExposed, freeSlot, FLIGHT, tickGame, advance, forecast, forecastKey, fates, busy, revealLone, checkOf, pace, Attempt, FAST,
-  setView, seen, camPos, pitchUnits, pitchRad, YAW_STEPS, START_YAW, START_PITCH, PITCH_STEPS, TURN, SEEK, STALL } from '../js/logic.js';
+  setView, seen, camPos, lookAt, pitchUnits, pitchRad, YAW_STEPS, START_YAW, START_PITCH, PITCH_STEPS, TURN, SEEK, STALL } from '../js/logic.js';
 import { pixels } from '../tools/sight.mjs';
 import { LEVELS, buildLevel, dealLevel, levelPrint, rng } from '../js/levels.js';
 import { plan, greedy, greedyCheck, hastyCheck, hastyGreedy, lineHolds, playLine, onClock, earlyParks, forecastFirst, backtrack, forecastCheck, hastyForecastCheck, backtrackCheck, firingTime, curveMisses, GAPS, LAND, GREEDY_PLAYS, PARK_MIN } from '../tools/players.mjs';
@@ -21,11 +21,12 @@ const grid = (sx, sy, sz, cubes, palette = ['#f00', '#0f0', '#00f', '#ff0']) => 
   for (const [x, y, z, c] of cubes) cells[x + sx * (y + sy * z)] = c;
   return { sx, sy, sz, cells, palette };
 };
-// A cube of colour `core` standing on the turntable in the middle of a 3 x 2 x 3 grid, with a cube
-// of colour `lid` on top of it and one of colour `side` on each of its four sides: it can be hit
-// only once one of those five has gone. The lid is the highest, so a crew of its colour takes it first.
-const covered = (core, lid, side = lid) => grid(3, 2, 3, [[1, 0, 1, core], [1, 1, 1, lid], [0, 0, 1, side], [2, 0, 1, side], [1, 0, 0, side], [1, 0, 2, side]]);
-const CORE = 1 + 3 * (0 + 2 * 1), LID = 1 + 3 * (1 + 2 * 1); // the core's and the lid's cells
+// A cube of colour `core` in the middle of a 3 x 3 x 3 grid, with a cube of colour `lid` on top of
+// it and one of colour `side` on each of its four sides and under it (the sculpture floats, so its
+// underside is open air too): it can be hit only once one of those six has gone. The lid is the
+// highest, so a crew of its colour takes it first.
+const covered = (core, lid, side = lid) => grid(3, 3, 3, [[1, 1, 1, core], [1, 2, 1, lid], [0, 1, 1, side], [2, 1, 1, side], [1, 1, 0, side], [1, 1, 2, side], [1, 0, 1, side]]);
+const CORE = 1 + 3 * (1 + 3 * 1), LID = 1 + 3 * (2 + 3 * 1); // the core's and the lid's cells
 // The lines whose front crew member has a cube of its colour to hit right now. Most levels keep
 // colours hidden inside, and some open with no ready front at all, so a test that wants cubes to go
 // sends one of these (the k-th, round and round), or else parks a front with a ready crew member
@@ -42,30 +43,30 @@ const readyLine = (st, k = 0) => {
 test('a cube is on the outside while one of its faces touches the outside air', () => {
   const m = solid(3);
   const st = makeBoard(m);
-  assert.equal(st.exposed[0].size, 25, 'every cube of a 3x3x3 block but the middle one and the one under it');
+  assert.equal(st.exposed[0].size, 26, 'every cube of a 3x3x3 block but the middle one');
   assert.equal(isExposed(st, at(m, 1, 1, 1)), false, 'the middle is sealed in');
-  assert.equal(isExposed(st, at(m, 1, 0, 1)), false, 'the bottom middle stands on the turntable: nothing is hit from below');
-  assert.equal(isExposed(st, at(m, 0, 0, 0)), true, 'a bottom corner can be hit from the side');
+  assert.equal(isExposed(st, at(m, 1, 0, 1)), true, 'the bottom middle: nothing holds the sculpture up, so its underside is on the open air');
+  assert.equal(isExposed(st, at(m, 0, 0, 0)), true, 'a bottom corner');
   assert.equal(isExposed(st, at(m, 1, 1, 0)), true, 'the middle of a side, with cubes above and below it');
   removeCube(st, at(m, 1, 1, 0));
   assert.equal(st.exposed[0].has(at(m, 1, 1, 1)), true, 'taking a cube from the side opens the one behind it');
-  assert.equal(isExposed(st, at(m, 1, 0, 1)), false, 'but not the one under that');
-  removeCube(st, at(m, 1, 1, 1));
-  assert.equal(st.exposed[0].has(at(m, 1, 0, 1)), true);
-  assert.equal(st.exposed[0].size, 25);
+  assert.equal(st.exposed[0].size, 26);
 });
 
 test('a cube sealed inside cannot be hit, and can be the moment a cube beside it goes', () => {
   for (const [x, z] of [[0, 1], [2, 1], [1, 0], [1, 2]]) {
     const st = makeBoard(covered(2, 1));
     assert.equal(st.exposed[1].size, 0, 'green, sealed in by red, cannot be hit');
-    assert.equal(st.exposed[0].size, 5, 'every red can');
-    removeCube(st, x + 3 * 2 * z);
+    assert.equal(st.exposed[0].size, 6, 'every red can');
+    removeCube(st, x + 3 * (1 + 3 * z));
     assert.deepEqual([...st.exposed[1]], [CORE], `the side cube at ${x},${z} goes and green opens`);
   }
   const st = makeBoard(covered(2, 1));
   removeCube(st, LID);
   assert.deepEqual([...st.exposed[1]], [CORE], 'so it does when the lid goes');
+  const under = makeBoard(covered(2, 1));
+  removeCube(under, 1 + 3 * (0 + 3 * 1));
+  assert.deepEqual([...under.exposed[1]], [CORE], 'and when the cube under it goes: the sculpture floats, so the air comes in from below');
 });
 
 test('air sealed inside a hollow does not open its walls until the hollow is opened', () => {
@@ -80,9 +81,7 @@ test('air sealed inside a hollow does not open its walls until the hollow is ope
   assert.deepEqual([...st.exposed[1]], [at(m, 2, 3, 2)], 'the top wall opens from above; the rest still face sealed air');
   removeCube(st, at(m, 2, 3, 2));
   assert.deepEqual([...st.exposed[1]].sort((a, b) => a - b), walls.filter(([, y]) => y !== 3).map(([x, y, z]) => at(m, x, y, z)).sort((a, b) => a - b), 'breaking in lets the air in: every wall left opens at once');
-  assert.equal(isExposed(st, at(m, 2, 0, 2)), false, 'and not the cube under the floor');
-  removeCube(st, at(m, 2, 1, 2));
-  assert.equal(isExposed(st, at(m, 2, 0, 2)), true, 'until the floor goes');
+  assert.equal(isExposed(st, at(m, 1, 2, 1)), false, 'and not the red cubes behind the walls');
 });
 
 test('a shot takes its cube when it leaves, and opens what is behind it only when it lands', () => {
@@ -148,7 +147,7 @@ test('one targeting rule: the highest cube first, then the one farthest out, nev
   assert.deepEqual(order.slice(0, 4).map(i => i % 3 !== 1 && Math.floor(i / 9) !== 1), [true, true, true, true], 'its four corners before its middle');
   assert.equal(order[8], at(m, 1, 2, 1), 'the middle of the top layer last');
   assert.equal(isWon(st), true);
-  // The same taps at the same ticks give the same board (the turntable turns the same way).
+  // The same taps at the same ticks give the same board (the sculpture turns the same way).
   const L = buildLevel(8);
   const a = cloneBoard(L.board), b = cloneBoard(L.board);
   for (let k = 0; k < 6; k++) {
@@ -162,27 +161,29 @@ test('one targeting rule: the highest cube first, then the one farthest out, nev
   assert.deepEqual(a.cells, b.cells);
 });
 
-// A 3 x 2 x 3 red block with one green cube at the bottom of its back: in sight only from the back.
+// A 3 x 3 x 3 red block with one green cube in the middle of its back: in sight only from the back.
 const backOnly = () => {
   const cubes = [];
-  for (let x = 0; x < 3; x++) for (let y = 0; y < 2; y++) for (let z = 0; z < 3; z++) cubes.push([x, y, z, x === 1 && y === 0 && z === 0 ? 2 : 1]);
-  return grid(3, 2, 3, cubes);
+  for (let x = 0; x < 3; x++) for (let y = 0; y < 3; y++) for (let z = 0; z < 3; z++) cubes.push([x, y, z, x === 1 && y === 1 && z === 0 ? 2 : 1]);
+  return grid(3, 3, 3, cubes);
 };
-// A 5 x 2 x 5 pit: a red floor with one green cube in its middle, walled in red all round.
+// A 5 x 3 x 5 pit: a red floor with one green cube in its middle, on a red slab (so green is not
+// seen from below), walled in red all round.
 const pit = () => {
   const cubes = [];
   for (let x = 0; x < 5; x++) for (let z = 0; z < 5; z++) {
-    cubes.push([x, 0, z, x === 2 && z === 2 ? 2 : 1]);
-    if (x === 0 || x === 4 || z === 0 || z === 4) cubes.push([x, 1, z, 1]);
+    cubes.push([x, 0, z, 1]);
+    cubes.push([x, 1, z, x === 2 && z === 2 ? 2 : 1]);
+    if (x === 0 || x === 4 || z === 0 || z === 4) cubes.push([x, 2, z, 1]);
   }
-  return grid(5, 2, 5, cubes);
+  return grid(5, 3, 5, cubes);
 };
-const PIT = 2 + 5 * (0 + 2 * 2);
+const PIT = 2 + 5 * (1 + 3 * 2);
 
-test('crew hit only cubes on a side facing the camera; the turntable brings the rest round', () => {
+test('crew hit only cubes on a side facing the camera; the turning sculpture brings the rest round', () => {
   const m = backOnly();
   const st = makeBoard(m);
-  const green = at(m, 1, 0, 0);
+  const green = at(m, 1, 1, 0);
   assert.equal(isExposed(st, green), true, 'the green cube is on the outside, at the back');
   st.slots = [crew(0, 1, 1)];
   assert.equal(target(st, 1), -1, 'the back faces away from the camera at the start: green waits');
@@ -190,12 +191,12 @@ test('crew hit only cubes on a side facing the camera; the turntable brings the 
   assert.equal(isJammed(st), false);
   assert.ok(setView(st, (START_YAW + YAW_STEPS / 2) % YAW_STEPS, START_PITCH, 0), 'turned half round, the back faces the camera');
   assert.equal(target(st, 1), green);
-  // Left to the turntable, the back comes round within half a turn.
+  // Left to turn on its own, the back comes round within half a turn.
   const t = makeBoard(m);
   t.slots = [crew(0, 1, 1)];
   let at0 = -1;
   for (let k = 0; k < YAW_STEPS / TURN && at0 < 0; k++) if (step(t).shots.length) at0 = t.tick;
-  assert.ok(at0 > 0 && at0 < (YAW_STEPS / TURN) * 0.75, `the turntable brings it round (tick ${at0})`);
+  assert.ok(at0 > 0 && at0 < (YAW_STEPS / TURN) * 0.75, `the turn brings it round (tick ${at0})`);
 });
 
 test('a cube hidden from the camera by a part of the sculpture is not hit; tilting up shows it', () => {
@@ -226,13 +227,13 @@ test('a cube seen at a slant into a notch can be hit, though no straight line of
   assert.equal(seen(st, green), false, 'from the back the slab hides it');
 });
 
-test('the camera can look from below and from almost straight above; from below the turntable hides what stands on it', () => {
+test('the camera can look from below and from almost straight above; from below it sees the underside', () => {
   assert.ok(pitchRad(0) < -1 && pitchRad(PITCH_STEPS - 1) > 1.4, 'from well below level to almost straight down');
   const st = makeBoard(stack(1));
   setView(st, 0, pitchUnits(0.2), 0);
-  assert.equal(seen(st, 0), true, 'a cube on the turntable, from the side');
+  assert.equal(seen(st, 0), true, 'a floating cube, from the side');
   setView(st, 0, pitchUnits(-1), 0);
-  assert.equal(seen(st, 0), false, 'from below, the turntable is in the way');
+  assert.equal(seen(st, 0), true, 'from below, its underside: nothing holds the sculpture up');
   setView(st, 0, pitchUnits(1.45), 0);
   assert.equal(seen(st, 0), true, 'from almost straight above, its top');
 });
@@ -261,7 +262,7 @@ test('crew who wait with nothing in view make the camera swing to it; held still
   assert.equal(step(b).shots.length, 1, 'tilted up, green fires at once');
 });
 
-test('the camera that swings for crew who wait looks from below the turntable too, under a part that sticks out', () => {
+test('the camera that swings for crew who wait looks from below too, under a part that sticks out', () => {
   // A red post with a red arm sticking out at the top; one green cube hangs under the arm's end,
   // with red on its four sides, so only its underside is open to the air: only from below is it seen.
   const cubes = [[1, 0, 1, 1], [1, 1, 1, 1], [1, 2, 1, 1], [1, 3, 1, 1], [2, 3, 1, 1], [3, 3, 1, 1], [3, 2, 1, 2],
@@ -294,8 +295,7 @@ test('every shot takes a cube that shows on the phone screen at the moment it le
       const r = tickGame(st);
       for (const s of r.shots) {
         shots++;
-        const ty = -0.6 + (st.topY + 0.6) * 0.46;
-        const shown = pixels(st, camPos(st), [st.sx / 2, ty, st.sz / 2], 14, 0.66, 780, 1180).get(s.cell) || 0;
+        const shown = pixels(st, camPos(st), lookAt(st), 14, 0.66, 780, 1180).get(s.cell) || 0;
         assert.ok(shown > 0, `${LEVELS[n].name}: a shot at tick ${st.tick} took cube ${s.cell}, which does not show on the screen`);
       }
     }
@@ -381,18 +381,18 @@ test('a level is dealt once and handed out fresh', () => {
 });
 
 test('the planning player treats a "?" as unknown until it reaches the front', () => {
-  // Two cubes sealed in, each in the middle of a plus of cubes on the turntable with one more cube
-  // on top, and one pad. The only winning order depends on what the two "?" are, so a player who
+  // Two cubes sealed in, each in the middle of a plus of cubes with one more cube on top and one
+  // under it (the colour of the one on top), and one pad. The only winning order depends on what the two "?" are, so a player who
   // sees just the screen would have to guess: the planning player must refuse this deal, and wins
   // it once it may look.
   const plus = (x, [mid, top, left, right, front, back]) =>
-    [[x + 1, 0, 1, mid], [x + 1, 1, 1, top], [x, 0, 1, left], [x + 2, 0, 1, right], [x + 1, 0, 0, front], [x + 1, 0, 2, back]];
-  const m = grid(7, 2, 3, [...plus(0, [4, 3, 1, 3, 4, 1]), ...plus(4, [4, 2, 3, 2, 2, 1])]);
+    [[x + 1, 1, 1, mid], [x + 1, 2, 1, top], [x + 1, 0, 1, top], [x, 1, 1, left], [x + 2, 1, 1, right], [x + 1, 1, 0, front], [x + 1, 1, 2, back]];
+  const m = grid(7, 3, 3, [...plus(0, [4, 3, 1, 3, 4, 1]), ...plus(4, [4, 2, 3, 2, 2, 1])]);
   const deal = hidden => {
     const st = makeBoard(m);
     st.slots = [null];
     const line = (col, ...cs) => cs.map(([color, count, h], k) => ({ ...crew(10 * col + k, color, count), hidden: hidden && !!h }));
-    st.columns = [line(0, [2, 1], [1, 3, 1]), line(1, [3, 3], [0, 2], [0, 1, 1], [2, 2])];
+    st.columns = [line(0, [2, 1], [1, 4, 1]), line(1, [3, 3], [0, 2], [0, 1, 1], [2, 3])];
     return st;
   };
   const seen = plan(deal(false));

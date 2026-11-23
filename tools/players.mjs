@@ -1,5 +1,5 @@
 // Test players for measuring a level, using the same rules and ticks as the game (js/logic.js).
-// The turntable turns on its own in every one of them (the board's st.spin), so a crew member
+// The sculpture turns on its own in every one of them (the board's st.spin), so a crew member
 // whose colour is round the back waits for it, as in the game.
 // greedy and plan wait for the pads to stop before each send; playLine, hastyGreedy and
 // hastyForecast (below) send while shots are still in the air, with the game's landing pause and

@@ -1,22 +1,22 @@
 // The rules of the game, with no DOM and no three.js, so the tests run them in Node.
 // A board is a voxel grid of colour indices (0 = empty, c+1 = colour c), y pointing up.
-// The crew hit only cubes the player can see. A cube is on the outside while one of its faces
-// touches the outside air (the turntable under the sculpture is not air, and nor is air sealed in
-// a hollow until a cube between it and the outside goes). It can be hit while such a face is
-// turned well towards the camera and a fair part of that face has a clear straight line to the
-// camera, nothing of the sculpture or the turntable in between: what the player sees, from
-// wherever the camera looks, the top, the sides, at a slant into a notch, or from below. So the
+// The crew hit only cubes the player can see. The sculpture floats in the air, with nothing under
+// it, and turns. A cube is on the outside while one of its faces touches the outside air, its
+// underside too (air sealed in a hollow is not outside air until a cube between it and the outside
+// goes). It can be hit while such a face is turned well towards the camera and a fair part of that
+// face has a clear straight line to the camera, no other cube in between: what the player sees,
+// from wherever the camera looks, the top, the sides, at a slant into a notch, or from below. So the
 // crew eat the sculpture from the outside in, and a colour hidden inside waits until the cubes
 // covering it go. A cube the camera cannot see is never hit, however long the crew wait.
 //
-// The view is part of the board: st.yaw (how far the turntable has turned, YAW_STEPS to a turn),
+// The view is part of the board: st.yaw (how far the sculpture has turned, YAW_STEPS to a turn),
 // st.pitch (how high the camera looks from, PITCH_STEPS from low to high) and st.spin (how far the
-// turntable turns each tick: TURN on its own, 0 while the player holds it). The game sets them
+// sculpture turns each tick: TURN on its own, 0 while the player holds it). The game sets them
 // when the player turns or tilts the sculpture (Attempt.view), and a saved attempt keeps those
 // changes, so playing it back hits the same cubes. The forecast and the test players let the
-// turntable turn on its own.
+// sculpture turn on its own.
 //
-// Time runs in ticks. In one tick the turntable turns by st.spin, then every pad that can fire
+// Time runs in ticks. In one tick the sculpture turns by st.spin, then every pad that can fire
 // sends one shot. A shot picks its cube when it leaves (that cube is then taken: no second shot
 // aims at it) and the cube is removed, opening the cubes behind it, only when the shot lands,
 // FLIGHT ticks later. The game runs one tick every 1/30 s, or FAST times as often while there is
@@ -31,12 +31,12 @@ export const FAST = 3;        // how much faster the ticks run while there is no
 // Which version of these rules a saved attempt was played under (js/main.js keeps it with the
 // save). Add one whenever a change here makes the same sends end on a different board, so a level
 // left half-played under the old rules starts again instead of coming back wrong.
-export const RULES = 7;
-// The view (see the top of this file). A turn of the turntable is YAW_STEPS steps; on its own it
+export const RULES = 8;
+// The view (see the top of this file). A turn of the sculpture is YAW_STEPS steps; on its own it
 // turns TURN steps a tick (about 0.41 radians a second, a turn in 15 seconds at normal speed). The
 // camera looks from PITCH_MIN to PITCH_MAX radians above level in PITCH_STEPS steps: from well
-// below the turntable (it hides what stands on it) to almost straight down, so with the turn the
-// player can look at the sculpture from every direction.
+// below the sculpture, looking up at its underside, to almost straight down, so with the turn the
+// player can look at it from every direction.
 export const YAW_STEPS = 4096;
 export const TURN = 9;
 export const PITCH_STEPS = 96;
@@ -49,16 +49,19 @@ export const pitchRad = u => PITCH_MIN + (u * (PITCH_MAX - PITCH_MIN)) / (PITCH_
 export const yawUnits = rad => ((Math.round((rad * YAW_STEPS) / (2 * Math.PI)) % YAW_STEPS) + YAW_STEPS) % YAW_STEPS;
 export const pitchUnits = rad => Math.max(0, Math.min(PITCH_STEPS - 1, Math.round(((rad - PITCH_MIN) * (PITCH_STEPS - 1)) / (PITCH_MAX - PITCH_MIN))));
 export const START_PITCH = pitchUnits(0.39); // about 22 degrees above level
-// While the turntable turns on its own and crew on the pads have waited SEEK ticks with nothing
+// While the sculpture turns on its own and crew on the pads have waited SEEK ticks with nothing
 // of their colour in view, the camera swings round to the nearest view that shows a fair part of
 // one of their cubes, or failing that a sliver of one (swing()), and they fire at it; the screen
-// glides there in about a fifth of a second, while the shot flies. The camera goes back to the
-// height the player left it at (st.home) once a shot flies. A shot never takes a cube the camera
+// glides there in about a fifth of a second, while the shot flies. The camera stays at that height
+// while shots keep flying from it (the underside of a floating sculpture is eaten from below, not
+// one cube per swing), and goes back to the height the player left it at (st.home) once nothing
+// has fired or landed for LINGER ticks, or nobody waits. A shot never takes a cube the camera
 // cannot see: crew whose colour shows from no view wait until the cubes covering it go (the player
 // sends other crew), or until the player turns or tilts the sculpture to show it. The checks below
 // call a board settled after twice STALL ticks with nothing fired or landed.
 export const SEEK = 120;
 export const STALL = 520;
+export const LINGER = 30;
 // While it moves, the camera's height changes by SEEK_JUMP pitch steps every SEEK_STEP ticks (the
 // screen glides between them).
 const SEEK_STEP = 5, SEEK_JUMP = 2;
@@ -110,16 +113,16 @@ function zobrist(n) {
 // line of the grid coming in from a side (front, back, left, right or the top), that side is
 // turned to the camera (SIDE_FACING), and the line from the middle of that side of it to the camera
 // is clear. Most shots find their cube this way.
-const SIDES = 5;
-const SIDE_N = [[1, 0, 0], [-1, 0, 0], [0, 0, 1], [0, 0, -1], [0, 1, 0]];
+const SIDES = 6;
+const SIDE_N = [[1, 0, 0], [-1, 0, 0], [0, 0, 1], [0, 0, -1], [0, 1, 0], [0, -1, 0]];
 const SIDE_FACING = 0.3;
 // st.out[i] is 1 when cell i is on the outside: an empty cell that is outside air (joined to the
 // space around the grid), or a cube with a face on that air. It only ever turns from 0 to 1, so a
 // cube that goes leaves a gap with the same mark. st.taken[i] is 1 while a shot is on its way to
 // cube i. st.exposed[c] holds the cubes of colour c on the outside that no shot has taken yet: the
-// ones a crew member of that colour can hit once the camera sees them (canReach). st.reachR and
-// st.tableR are how far the sculpture and the turntable reach from the middle of the grid, and
-// st.topY how high the sculpture stands, in cells (as js/render.js draws them).
+// ones a crew member of that colour can hit once the camera sees them (canReach). st.reachR is how
+// far the sculpture reaches from the middle of the grid as it turns, and st.topY how high it
+// stands, in cells (as js/render.js draws it).
 export function makeBoard(model) {
   const { sx, sy, sz, palette } = model;
   const cells = Uint8Array.from(model.cells);
@@ -137,7 +140,7 @@ export function makeBoard(model) {
     out: new Uint8Array(cells.length), taken: new Uint8Array(cells.length), side: new Uint8Array(cells.length),
     qKey: new Int32Array(cells.length).fill(-1), qBlock: new Int32Array(cells.length),
     fKey: new Int32Array(cells.length).fill(-1), fN: new Uint8Array(cells.length), fBlock: new Int32Array(cells.length * F_KEEP), fRev: new Int32Array(cells.length),
-    tableR: reachR + 0.5, reachR, topY,
+    reachR, topY,
     remaining: new Int32Array(n),
     exposed: Array.from({ length: n }, () => new Set()),
     byOrder: Array.from({ length: n }, () => []), sorted: new Uint8Array(n).fill(1),
@@ -159,17 +162,17 @@ export function makeBoard(model) {
     const [dx, dy, dz] = SIDE_N[s];
     for (let i = 0; i < cells.length; i++) {
       const x = i % sx, y = Math.floor(i / sx) % sy, z = Math.floor(i / (sx * sy));
-      if ((dx > 0 && x !== sx - 1) || (dx < 0 && x !== 0) || (dy > 0 && y !== sy - 1) || (dz > 0 && z !== sz - 1) || (dz < 0 && z !== 0)) continue;
+      if ((dx > 0 && x !== sx - 1) || (dx < 0 && x !== 0) || (dy > 0 && y !== sy - 1) || (dy < 0 && y !== 0) || (dz > 0 && z !== sz - 1) || (dz < 0 && z !== 0)) continue;
       const j = along(st, x, y, z, -dx, -dy, -dz);
       if (j >= 0) st.side[j] |= 1 << s;
     }
   }
-  // Every cell on a side or the top of the grid touches the space around it; the air spreads in
-  // from there. The bottom layer stands on the turntable, which is not air.
+  // Every cell on a side, the top or the bottom of the grid touches the space around it (nothing
+  // holds the sculpture up); the air spreads in from there.
   const air = [];
   for (let i = 0; i < cells.length; i++) {
     const x = i % sx, y = Math.floor(i / sx) % sy, z = Math.floor(i / (sx * sy));
-    if (x && z && x < sx - 1 && z < sz - 1 && y < sy - 1) continue;
+    if (x && y && z && x < sx - 1 && y < sy - 1 && z < sz - 1) continue;
     if (reach(st, i)) air.push(i);
   }
   for (const i of air) letAirIn(st, i);
@@ -271,7 +274,7 @@ export function removeCube(st, i) {
 }
 
 // ---------- the view: what the camera sees ----------
-// While the turntable turns, the rules look from the middle of the step of VIEW_STEP (about 2.8
+// While the sculpture turns, the rules look from the middle of the step of VIEW_STEP (about 2.8
 // degrees) it is in, so what is in view changes 64 times a turn, not every tick, and is worked out
 // once for each; the screen is never more than 1.4 degrees from the view the rules use. While the
 // player holds it still they look from exactly where it stands.
@@ -280,7 +283,7 @@ const yawKey = st => (st.spin ? Math.floor(st.yaw / VIEW_STEP) : YAW_STEPS / VIE
 const viewYaw = st => (st.spin ? Math.floor(st.yaw / VIEW_STEP) * VIEW_STEP + VIEW_STEP / 2 : st.yaw);
 const viewKey = st => yawKey(st) * PITCH_STEPS + st.pitch;
 
-// The camera's direction seen from the sculpture, in the grid's own frame: the turntable turned by
+// The camera's direction seen from the sculpture, in the grid's own frame: the sculpture turned by
 // yaw (three.js turns the sculpture by rotation.y = yaw, js/render.js), the camera pitch above level
 // (below it when pitch is negative).
 export function viewDir(st) {
@@ -292,8 +295,8 @@ export function viewDir(st) {
   return st._dir;
 }
 
-// Where the camera is, in grid units (cell (x, y, z) spans [x, x + 1) on each axis, the turntable's
-// top is y = 0): placed the way js/render.js frames the sculpture and its turntable on a phone held
+// Where the camera is, in grid units (cell (x, y, z) spans [x, x + 1) on each axis, the
+// sculpture's underside is y = 0): placed the way js/render.js frames the sculpture on a phone held
 // upright (a stage CAM_ASPECT wide for its height, a CAM_FOV degree lens), from the middle of this
 // step of the view. Lines of sight go to this point, so a part that sticks out hides what the
 // screen shows it hiding, near the edges of the picture too.
@@ -306,36 +309,39 @@ export function camPos(st) {
   return st._cam;
 }
 
-// Where the camera is for the view with the turntable turned `yaw` steps and the camera `pitch`
-// steps high (camPos() is the board's own view). How far back it stands depends only on the height
-// and the sculpture's size, which never change on a board, so it is worked out once per height.
+// Where the camera is for the view with the sculpture turned `yaw` steps and the camera `pitch`
+// steps high (camPos() is the board's own view). It looks at the middle of the sculpture's height
+// (lookAt()), so the sculpture floats in the middle of the stage from above and from below alike.
+// How far back it stands depends only on the height and the sculpture's size, which never change
+// on a board, so it is worked out once per height.
+export const lookAt = st => [st.sx / 2, st.topY / 2, st.sz / 2];
 function camAt(st, yaw, pitch) {
   const p = pitchRad(pitch), sp = Math.sin(p), cp = Math.cos(p);
   const a = yawRad(yaw);
-  const ty = -0.6 + (st.topY + 0.6) * 0.46;
+  const ty = st.topY / 2;
   if (!st.camD) st.camD = new Float64Array(PITCH_STEPS).fill(-1);
   let d = st.camD[pitch];
-  if (d < 0) {
-    const top = st.topY, rad = st.tableR, reachR = st.reachR;
-    const tan = Math.tan((CAM_FOV * Math.PI) / 360), tanUp = tan * 0.92, tanDown = tan * 0.74, tanH = tan * CAM_ASPECT * 0.9;
-    d = 0;
-    const fit = (x, y, z) => {
-      const dy = y - ty, depth = dy * sp + z * cp, up = dy * cp - z * sp;
-      d = Math.max(d, depth + Math.abs(x) / tanH, depth + Math.abs(up) / (up > 0 ? tanUp : tanDown));
-    };
-    for (let k = 0; k < 24; k++) {
-      const t = (k / 24) * Math.PI * 2, c = Math.cos(t), s = Math.sin(t);
-      fit(c * rad, -0.6, s * rad); fit(c * rad, 0, s * rad); fit(c * reachR, top, s * reachR);
-    }
-    st.camD[pitch] = d;
-  }
+  if (d < 0) d = st.camD[pitch] = camBack(CAM_FOV, CAM_ASPECT, st.topY, st.reachR, p);
   return [st.sx / 2 - cp * d * Math.sin(a), ty + sp * d, st.sz / 2 + cp * d * Math.cos(a)];
 }
 
-// The line from (cx, ., cz) in direction (dx, ., dz) crosses the turntable's top at distance t.
-function onTable(st, cx, cz, dx, dz, t) {
-  const hx = cx + dx * t - st.sx / 2, hz = cz + dz * t - st.sz / 2;
-  return hx * hx + hz * hz < st.tableR * st.tableR;
+// How far back a camera `pitch` radians above level stands so the whole sculpture (`top` cells
+// high, reaching `reach` cells from its middle as it turns) fits a picture `aspect` wide for its
+// height through a lens `fov` degrees high, with more room left at the bottom, where the hint sits
+// over the stage. js/render.js frames the screen with this same function.
+export function camBack(fov, aspect, top, reach, pitch) {
+  const sp = Math.sin(pitch), cp = Math.cos(pitch), ty = top / 2;
+  const tan = Math.tan((fov * Math.PI) / 360), tanUp = tan * 0.92, tanDown = tan * 0.74, tanH = tan * aspect * 0.9;
+  let d = 0;
+  const fit = (x, y, z) => {
+    const dy = y - ty, depth = dy * sp + z * cp, up = dy * cp - z * sp;
+    d = Math.max(d, depth + Math.abs(x) / tanH, depth + Math.abs(up) / (up > 0 ? tanUp : tanDown));
+  };
+  for (let k = 0; k < 24; k++) {
+    const t = (k / 24) * Math.PI * 2, c = Math.cos(t), s = Math.sin(t);
+    fit(c * reach, 0, s * reach); fit(c * reach, top, s * reach);
+  }
+  return d;
 }
 
 // The first cube from (x, y, z) on, walking by (dx, dy, dz); -1 when the line runs out first.
@@ -368,7 +374,7 @@ function sideMask(st) {
 function plainView(st, i, m) {
   const bits = st.side[i] & m;
   if (!bits) return false;
-  const key = viewKey(st) * 32 + bits;
+  const key = viewKey(st) * 64 + bits;
   if (st.qKey[i] === key) {
     const b = st.qBlock[i];
     if (b < 0 || (b >= 0 && st.cells[b])) return b === -1;
@@ -389,7 +395,7 @@ function plainView(st, i, m) {
 }
 
 // The first cube on the line from point (qx, qy, qz) of cube i's surface in direction v: its
-// index, -2 for the turntable, or -1 when the line leaves clear.
+// index, or -1 when the line leaves clear.
 function lineFrom(st, i, qx, qy, qz, vx, vy, vz) {
   const { sx, sy, sz, cells } = st;
   const px = qx + vx * 1e-4, py = qy + vy * 1e-4, pz = qz + vz * 1e-4;
@@ -405,7 +411,7 @@ function lineFrom(st, i, qx, qy, qz, vx, vy, vz) {
     if (j !== i && cells[j]) return j;
     if (tx <= ty && tx <= tz) { x += stepX; tx += tdx; } else if (ty <= tz) { y += stepY; ty += tdy; } else { z += stepZ; tz += tdz; }
   }
-  return vy < 0 && onTable(st, px, pz, vx, vz, py / -vy) ? -2 : -1;
+  return -1;
 }
 
 // Cube i can be seen from the camera now: the quick check, or the middle of one of its faces on the
@@ -415,7 +421,7 @@ export function seen(st, i) {
 }
 
 // The faces of cube i on the outside air (its neighbour that way is outside the grid or outside
-// air; below the bottom layer is the turntable), one bit each in FACE_N's order.
+// air), one bit each in FACE_N's order.
 const FACE_N = [[1, 0, 0], [-1, 0, 0], [0, 0, 1], [0, 0, -1], [0, 1, 0], [0, -1, 0]];
 const FACE_FACING = 0.3; // turned less than about 72 degrees from the camera: edge-on is a sliver
 // The points of a face whose lines to the camera are tried: its middle and near its four corners,
@@ -434,7 +440,7 @@ function openFaces(st, i) {
   if (z === sz - 1 || open(i + sx * sy)) m |= 4;
   if (z === 0 || open(i - sx * sy)) m |= 8;
   if (y === sy - 1 || open(i + sx)) m |= 16;
-  if (y > 0 && open(i - sx)) m |= 32;
+  if (y === 0 || open(i - sx)) m |= 32;
   return m;
 }
 
@@ -550,7 +556,7 @@ export const canFire = (st, slot) => canReach(st, slot) && !(st.slots[slot].land
 export function target(st, c) {
   const key = viewKey(st) * 2 ** 27 + (st.rev % 2 ** 25) * 2 + (st.sliver ? 1 : 0);
   if (st.aimKey[c] === key) return st.aimCell[c];
-  // While the board stays as it is, the turntable brings the same views round again: what each
+  // While the board stays as it is, the turning sculpture brings the same views round again: what each
   // colour can hit from each is kept until something on the board changes (st.rev).
   if (st.memoRev !== st.rev || !st.memo) { st.memo = new Map(); st.memoRev = st.rev; }
   const mk = (viewKey(st) * 2 + (st.sliver ? 1 : 0)) * 64 + c;
@@ -684,7 +690,7 @@ function swing(st) {
   }
 }
 
-// One tick: the turntable turns by st.spin, the shots due now land (in the order they left), crew
+// One tick: the sculpture turns by st.spin, the shots due now land (in the order they left), crew
 // still landing on a pad come one tick closer, then every pad that can fire sends one shot, pad by
 // pad from the left. Returns what happened, for the screen.
 export function step(st) {
@@ -694,7 +700,7 @@ export function step(st) {
     st.yaw = turned(st.yaw, st.spin);
     if (st.spin) { // turning on its own: the camera looks for what the crew wait for (SEEK)
       if (st.quiet === SEEK) swing(st);
-      const want = st.quiet >= SEEK && st.seekH >= 0 ? st.seekH : st.home;
+      const want = st.seekH >= 0 ? st.seekH : st.home;
       if (st.tick % SEEK_STEP === 0) st.pitch += Math.sign(want - st.pitch) * Math.min(SEEK_JUMP, Math.abs(want - st.pitch));
     }
   }
@@ -713,18 +719,21 @@ export function step(st) {
   // How long crew on the pads have waited with nothing of theirs in view (target()).
   if (shots.length || landed.length) st.quiet = 0;
   else if (st.slots.some(s => s && s.count > 0 && !(s.land > 0) && st.exposed[s.color].size)) st.quiet++;
-  else st.quiet = 0;
-  if (!st.quiet) { st.seekH = -2; st.sliver = false; }
+  else { st.quiet = 0; st.seekH = -2; }
+  // A sliver does for the one shot the camera swung for; the height it swung to stays while shots
+  // keep flying, until LINGER quiet ticks (or nobody waiting) send it home.
+  if (!st.quiet) st.sliver = false;
+  if (st.quiet === LINGER) st.seekH = -2;
   return { landed, shots };
 }
 
 export const busy = st => st.flying.length > 0 || st.slots.some((_, i) => canReach(st, i));
 
-// The turntable's position after turning by `by` steps.
+// The sculpture's turn after turning by `by` steps.
 export const turned = (yaw, by) => (((yaw + by) % YAW_STEPS) + YAW_STEPS) % YAW_STEPS;
 
 // Runs ticks until every shot has landed and nothing on a pad has anything left in sight: what a
-// player who waits sees. The turntable turns on its own meanwhile (a board held still is let go).
+// player who waits sees. The sculpture turns on its own meanwhile (a board held still is let go).
 export function settle(st) {
   if (!st.spin) st.spin = TURN;
   let quiet = 0;
@@ -761,7 +770,7 @@ export function pace(st, down = false) {
 const idle = st => !st.flying.length && st.slots.every(s => !s || (!(s.land > 0) && !(s.count > 0 && st.exposed[s.color].size)));
 
 // Runs the game's ticks until st.tick is `tick` (a quiet board skips straight there, the
-// turntable turning as it would).
+// sculpture turning as it would).
 export function advance(st, tick) {
   while (st.tick < tick) {
     if (idle(st)) {
@@ -788,7 +797,7 @@ export function setView(st, yaw, pitch, spin) {
 
 // What sending the front of line `col` now would do if no more crew were sent after it: the
 // rules run on a copy of the board, with the crew already on the pads, the shots in the air,
-// the landing pause, the one targeting rule and the view as it is (the turntable turning and the
+// the landing pause, the one targeting rule and the view as it is (the sculpture turning and the
 // camera looking as they would if the player leaves them be; seeing every side at once instead was
 // wrong about 1 send in 1,000), until that crew member has sent its last shot
 // (it finishes and frees its pad) or nothing can fire any more (it parks, with `left` shots), and
