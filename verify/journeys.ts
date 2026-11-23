@@ -198,7 +198,7 @@ export const journeys = [
       },
       {
         // The crew hit only what the camera sees, so the view is part of the board: held, the
-        // turntable stops and the board takes the player's view; let go, it turns again.
+        // sculpture stops turning and the board takes the player's view; let go, it turns again.
         caption: "Drag to turn and tilt",
         highlight: true,
         run: async (ctx: any) => {
@@ -214,8 +214,8 @@ export const journeys = [
           const held = await view();
           await page.waitForTimeout(400);
           const still = await view();
-          if (held.hand !== "drag" || held.spin !== 0) throw new Error(`the turntable kept turning while held (${JSON.stringify(held)})`);
-          if (still.yaw !== held.yaw) throw new Error(`the turntable moved from ${held.yaw} to ${still.yaw} while held still`);
+          if (held.hand !== "drag" || held.spin !== 0) throw new Error(`the sculpture kept turning while held (${JSON.stringify(held)})`);
+          if (still.yaw !== held.yaw) throw new Error(`the sculpture turned from ${held.yaw} to ${still.yaw} while held still`);
           if (held.pitch <= v0.pitch + 10) throw new Error(`dragging down did not tilt the camera up (pitch ${v0.pitch} to ${held.pitch})`);
           const turned = Math.abs(((held.shown[0] - v0.shown[0] + Math.PI) % (2 * Math.PI) + 2 * Math.PI) % (2 * Math.PI) - Math.PI);
           if (turned < 0.5) throw new Error(`dragging sideways turned the sculpture only ${turned.toFixed(2)} radians`);
@@ -226,7 +226,7 @@ export const journeys = [
           for (;;) {
             const v = await view();
             if (v.spin > 0 && v.hand === "auto") break;
-            if (Date.now() > end) throw new Error(`the turntable did not turn on its own again after letting go (${JSON.stringify(v)})`);
+            if (Date.now() > end) throw new Error(`the sculpture did not turn on its own again after letting go (${JSON.stringify(v)})`);
             await page.waitForTimeout(200);
           }
         },
@@ -242,7 +242,7 @@ export const journeys = [
           const x = box.x + box.width / 2, y = box.y + box.height * 0.55;
           await page.mouse.move(x, y);
           await page.mouse.down();
-          // Up the screen tilts the camera down, past level with the turntable, to look up at it.
+          // Up the screen tilts the camera down, past level with the sculpture, to look up at its underside.
           for (let k = 1; k <= 36; k++) {
             await page.mouse.move(x + k * 2, y - k * 12);
             await page.waitForTimeout(30);
@@ -250,7 +250,7 @@ export const journeys = [
           }
           await page.waitForTimeout(300);
           const held = await view();
-          if (held.pitch >= 45) throw new Error(`dragging up did not take the camera below the turntable (pitch ${held.pitch}; level is about 45)`);
+          if (held.pitch >= 45) throw new Error(`dragging up did not take the camera below the sculpture (pitch ${held.pitch}; level is about 45)`);
           // The frame is taken while held, from below; the next step lets go.
         },
       },
@@ -263,7 +263,7 @@ export const journeys = [
           for (;;) {
             const v = await page.evaluate(() => (window as any).crumble.view);
             if (v.spin > 0 && v.hand === "auto") break;
-            if (Date.now() > end) throw new Error(`the turntable did not turn on its own again after letting go (${JSON.stringify(v)})`);
+            if (Date.now() > end) throw new Error(`the sculpture did not turn on its own again after letting go (${JSON.stringify(v)})`);
             await page.waitForTimeout(200);
           }
         },

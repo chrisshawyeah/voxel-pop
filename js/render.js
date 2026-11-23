@@ -1,10 +1,12 @@
-// The 3D stage: the sculpture on a turntable, seen from where the rules' view says (js/logic.js:
-// the turntable's turn and the camera's height are part of the board; js/main.js passes them on
-// with setView). The cubes stand flush against each other, so nothing behind them shows through;
-// a groove and a bevel on every face keep each cube readable. A cube about to be hit glows, pops,
-// puffs and bursts into chips that bounce on the turntable; the sculpture gives a little under
-// fire, drops onto its turntable at a level's start, and a colour cleared sends a ring across it.
+// The 3D stage: the sculpture floating in the air and turning, seen from where the rules' view
+// says (js/logic.js: its turn and the camera's height are part of the board; js/main.js passes them
+// on with setView). Nothing stands under it, so from below the player sees its underside. The cubes
+// stand flush against each other, so nothing behind them shows through; a groove and a bevel on
+// every face keep each cube readable. A cube about to be hit glows, pops, puffs and bursts into
+// chips that fall away; the sculpture gives a little under fire, drops into place at a level's
+// start, and a colour cleared sends a ring out from under it.
 import * as THREE from 'three';
+import { camBack } from './logic.js';
 
 const CHIP_POOL = 1400;
 const PUFF_POOL = 48;
@@ -12,7 +14,7 @@ const RING_POOL = 4;
 const CHIPS = 5;        // chips a cube bursts into (a pad fires up to 30 shots a second)
 const POP = 0.09;       // seconds a hit cube takes to pop
 const GLOW = 0.1;       // seconds a cube takes to glow white before its shot lands
-const TABLE_TOP = 0.3;  // the turntable's top, in world units
+const SHADOW_Y = -1.2;  // the soft shadow on the floor nobody sees, under the floating sculpture
 const GRAVITY = 24;
 const DROP = 1.2;       // how high the sculpture drops from at a level's start: a short hop, so it never leaves the view
 const DROP_TIME = 0.26; // seconds it falls
@@ -45,40 +47,23 @@ export class Stage {
     const rim = new THREE.DirectionalLight('#bcd8ff', 0.9);
     rim.position.set(-8, 4, -6);
     this.scene.add(rim);
-    // A soft light from below, so the turntable's underside reads as white when the camera looks up at it.
+    // A soft light from below, so the sculpture's underside reads clearly when the camera looks up at it.
     const under = new THREE.DirectionalLight('#ffffff', 0.9);
     under.position.set(2, -10, 3);
     this.scene.add(under);
 
     this.spin = new THREE.Group();
     this.scene.add(this.spin);
-    this.table = new THREE.Mesh(
-      new THREE.CylinderGeometry(1, 1.04, 0.6, 64),
-      new THREE.MeshStandardMaterial({ color: '#ffffff', roughness: 0.6 }),
-    );
-    this.spin.add(this.table);
-    this.tableRing = new THREE.Mesh(
-      new THREE.TorusGeometry(1.02, 0.06, 8, 64),
-      new THREE.MeshStandardMaterial({ color: '#ffd3e6', roughness: 0.5 }),
-    );
-    this.tableRing.rotation.x = Math.PI / 2;
-    this.spin.add(this.tableRing);
-    // Dots around the rim, so the turntable reads as turning even with no sculpture on it.
-    const dots = new THREE.InstancedMesh(new THREE.SphereGeometry(0.035, 8, 6), new THREE.MeshStandardMaterial({ color: '#ff9ec7', roughness: 0.5 }), 24);
-    for (let k = 0; k < 24; k++) {
-      const a = (k / 24) * Math.PI * 2;
-      dots.setMatrixAt(k, tmpM.makeTranslation(Math.cos(a) * 1.02, 0.02, Math.sin(a) * 1.02));
-    }
-    this.dots = dots;
-    this.spin.add(dots);
+    // A soft shadow well under the sculpture, so it reads as floating. It faces up only, so from
+    // below it is not drawn, and it never stands between the camera and a cube.
     const shadowTex = makeShadowTexture();
     this.shadow = new THREE.Mesh(new THREE.PlaneGeometry(1, 1), new THREE.MeshBasicMaterial({ map: shadowTex, transparent: true, depthWrite: false }));
     this.shadow.rotation.x = -Math.PI / 2;
+    this.shadow.position.y = SHADOW_Y;
     this.scene.add(this.shadow);
 
-    // The sculpture stands on the turntable's top; it squashes from there when it is hit.
+    // The sculpture's underside is at y = 0; it squashes from there when it is hit.
     this.sculpt = new THREE.Group();
-    this.sculpt.position.y = TABLE_TOP;
     this.spin.add(this.sculpt);
     const faces = makeFaceTextures();
     this.cubeGeo = new THREE.BoxGeometry(1, 1, 1);
@@ -94,7 +79,7 @@ export class Stage {
     this.chipState = Array.from({ length: CHIP_POOL }, () => ({ life: 0, max: 1, size: 1, p: new THREE.Vector3(), v: new THREE.Vector3(), r: new THREE.Euler(), w: new THREE.Vector3() }));
     this.chipNext = 0;
 
-    // A soft puff where a shot lands, and a ring across the turntable when a colour is cleared.
+    // A soft puff where a shot lands, and a ring out from under the sculpture when a colour is cleared.
     const puffTex = makePuffTexture();
     this.puffs = Array.from({ length: PUFF_POOL }, () => {
       const s = new THREE.Sprite(new THREE.SpriteMaterial({ map: puffTex, transparent: true, depthTest: false, depthWrite: false, opacity: 0 }));
@@ -105,7 +90,7 @@ export class Stage {
     this.puffNext = 0;
     this.rings = Array.from({ length: RING_POOL }, () => {
       const m = new THREE.Mesh(new THREE.RingGeometry(0.86, 1, 64), new THREE.MeshBasicMaterial({ transparent: true, depthWrite: false, side: THREE.DoubleSide }));
-      m.rotation.x = -Math.PI / 2; m.position.y = TABLE_TOP + 0.02; m.visible = false; m.life = 0;
+      m.rotation.x = -Math.PI / 2; m.position.y = -0.05; m.visible = false; m.life = 0;
       this.scene.add(m);
       return m;
     });
@@ -115,7 +100,7 @@ export class Stage {
     this.wob = 0; this.wobV = 0;
     this.flashes = new Map(); // instance -> seconds glowing
     this.pops = [];           // instances popping: { id, t }
-    this.drop = null;         // the sculpture dropping onto the turntable at a level's start: seconds so far
+    this.drop = null;         // the sculpture dropping into place at a level's start: seconds so far
     this.resize();
   }
 
@@ -130,8 +115,8 @@ export class Stage {
   // Builds the instanced cubes for the cubes still on a board (all of them at a level's start,
   // fewer after an undo or a restore). Grid cell i becomes instance idOf[i]. The framing comes
   // from the whole sculpture, so the camera does not move when cubes come back. `build` drops the
-  // sculpture onto the turntable in one piece, so nothing inside shows on the way (a level's start,
-  // not an undo or a restore).
+  // sculpture into place in one piece, so nothing inside shows on the way (a level's start, not an
+  // undo or a restore).
   load(board, model, build = false) {
     if (this.mesh) { this.sculpt.remove(this.mesh); this.mesh.dispose(); }
     this.board = board; this.model = model;
@@ -171,16 +156,13 @@ export class Stage {
       top = Math.max(top, y + 1);
     }
     const rad = reach + 0.5;
-    this.table.scale.set(rad, 1, rad); this.table.position.y = 0;
-    this.tableRing.scale.set(rad, rad, 1); this.tableRing.position.y = TABLE_TOP - 0.02;
-    this.dots.scale.set(rad, 1, rad); this.dots.position.y = TABLE_TOP;
-    this.shadow.scale.set(rad * 2.2, rad * 2.2, 1); // fades out at the stage's edges, never cut off by them this.shadow.position.y = -0.32;
-    this.size = { top: top + TABLE_TOP, reach, rad };
+    this.shadow.scale.set(rad * 2, rad * 2, 1); // fades out at its edges, so it is never cut off
+    this.size = { top, reach, rad };
     this.flashes.clear();
     this.pops.length = 0;
     this.wob = this.wobV = 0;
     this.drop = build && !calm() ? 0 : null;
-    this.sculpt.position.y = TABLE_TOP + (this.drop === null ? 0 : DROP);
+    this.sculpt.position.y = this.drop === null ? 0 : DROP;
     this.clearChips(); // chips of cubes an undo put back would fly over them
     this.frame();
   }
@@ -203,35 +185,21 @@ export class Stage {
     for (const r of this.rings) { r.life = 0; r.visible = false; }
   }
 
-  // The view to draw: the turntable turned by `yaw` and the camera `pitch` above level, both in
+  // The view to draw: the sculpture turned by `yaw` and the camera `pitch` above level, both in
   // radians (js/logic.js yawRad and pitchRad of the board's view, or the player's own while they
   // turn it).
   setView(yaw, pitch) { this.yaw = yaw; this.pitch = pitch; }
 
-  // Fits the sculpture and its turntable into the stage from the camera's height now, whatever
-  // the shape and the screen: every point round the turntable's edge and the sculpture's top must
-  // fall inside the view, with more room left at the bottom, where the hint sits over the stage.
+  // Fits the floating sculpture into the stage from the camera's height now, whatever the shape
+  // and the screen, looking at the middle of its height (js/logic.js camBack, the same framing the
+  // rules see from), with more room left at the bottom, where the hint sits over the stage.
   frame() {
     if (!this.size) return;
-    const { top, reach, rad } = this.size;
+    const { top, reach } = this.size;
     const p = this.pitch;
     const sp = Math.sin(p), cp = Math.cos(p);
-    const ty = -0.3 + (top + 0.3) * 0.46;
-    const tan = Math.tan(THREE.MathUtils.degToRad(this.camera.fov) / 2);
-    const tanUp = tan * 0.92, tanDown = tan * 0.74, tanH = tan * this.camera.aspect * 0.9;
-    let d = 0;
-    const fit = (x, y, z) => {
-      const dy = y - ty;
-      const depth = dy * sp + z * cp; // toward the camera
-      const up = dy * cp - z * sp;
-      d = Math.max(d, depth + Math.abs(x) / tanH, depth + Math.abs(up) / (up > 0 ? tanUp : tanDown));
-    };
-    for (let k = 0; k < 24; k++) {
-      const a = (k / 24) * Math.PI * 2, c = Math.cos(a), s = Math.sin(a);
-      fit(c * rad, -0.3, s * rad);
-      fit(c * rad, TABLE_TOP, s * rad);
-      fit(c * reach, top, s * reach);
-    }
+    const ty = top / 2;
+    const d = camBack(this.camera.fov, this.camera.aspect, top, reach, p);
     this.dist = d;
     this.camera.position.set(0, ty + sp * d, cp * d);
     this.camera.lookAt(0, ty, 0);
@@ -300,7 +268,7 @@ export class Stage {
     }
   }
 
-  // `n` chips of `color` from world point p: thrown outward from the turntable's middle and a
+  // `n` chips of `color` from world point p: thrown outward from the sculpture's middle and a
   // little toward the camera, in shades of the colour.
   burst(p, color, n) {
     const out = tmpV.set(p.x, 0, p.z);
@@ -334,8 +302,8 @@ export class Stage {
     s.life = 0.28; s.visible = true;
   }
 
-  // A colour's last cube went: a ring of that colour across the turntable, and a fountain of its
-  // chips from the rim.
+  // A colour's last cube went: a ring of that colour out from under the sculpture, and a fountain of
+  // its chips round its base.
   cleared(colorIndex) {
     const color = this.colors?.[colorIndex];
     if (!color || !this.size) return;
@@ -346,12 +314,12 @@ export class Stage {
     if (calm()) return;
     for (let k = 0; k < 18; k++) {
       const a = (k / 18) * Math.PI * 2;
-      tmpS.set(Math.cos(a) * this.size.rad * 0.9, TABLE_TOP + 0.2, Math.sin(a) * this.size.rad * 0.9);
+      tmpS.set(Math.cos(a) * this.size.rad * 0.9, 0.2, Math.sin(a) * this.size.rad * 0.9);
       this.burst(tmpS.clone(), color, 1);
     }
   }
 
-  // Big finale: chips of every colour rain over the turntable.
+  // Big finale: chips of every colour burst out of where the sculpture was.
   finale() {
     const rad = this.size ? this.size.rad : 3, top = this.size ? this.size.top : 5;
     for (let k = 0; k < (calm() ? 40 : 140); k++) {
@@ -360,7 +328,7 @@ export class Stage {
       this.chipNext = (this.chipNext + 1) % CHIP_POOL;
       c.life = c.max = 1.2 + Math.random() * 0.9;
       c.size = 0.6 + Math.random() * 0.8;
-      c.p.set((Math.random() - 0.5) * rad, TABLE_TOP + Math.random() * top, (Math.random() - 0.5) * rad);
+      c.p.set((Math.random() - 0.5) * rad, Math.random() * top, (Math.random() - 0.5) * rad);
       c.v.set((Math.random() - 0.5) * 12, 5 + Math.random() * 10, (Math.random() - 0.5) * 12);
       c.w.set((Math.random() - 0.5) * 16, (Math.random() - 0.5) * 16, (Math.random() - 0.5) * 16);
       this.chips.setColorAt(id, this.colors[k % this.colors.length]);
@@ -384,7 +352,7 @@ export class Stage {
       // Falling as things fall, then a squash and a puff of dust where it lands.
       this.drop += dt;
       const t = Math.min(1, this.drop / DROP_TIME);
-      this.sculpt.position.y = TABLE_TOP + DROP * (1 - t * t);
+      this.sculpt.position.y = DROP * (1 - t * t);
       if (t >= 1) {
         this.drop = null;
         this.wobV = -2.2;
@@ -424,22 +392,15 @@ export class Stage {
     if (recolour) this.mesh.instanceColor.needsUpdate = true;
     let live = false;
     const rad = this.size ? this.size.rad : 0;
+    // Chips fall away: nothing under the sculpture catches them.
     for (let k = 0; k < CHIP_POOL; k++) {
       const c = this.chipState[k];
       if (c.life <= 0) continue;
       live = true;
       c.life -= dt;
       if (c.life <= 0) { this.chips.setMatrixAt(k, ZERO); continue; }
-      const was = c.p.y;
       c.v.y -= GRAVITY * dt;
       c.p.addScaledVector(c.v, dt);
-      const floor = TABLE_TOP + 0.15 * c.size;
-      // Chips land on the turntable and bounce; off its edge they keep falling.
-      if (c.p.y < floor && was >= floor - 1e-3 && c.p.x * c.p.x + c.p.z * c.p.z < rad * rad) {
-        c.p.y = floor;
-        c.v.y = Math.abs(c.v.y) > 2 ? -c.v.y * 0.42 : 0;
-        c.v.x *= 0.72; c.v.z *= 0.72; c.w.multiplyScalar(0.6);
-      }
       c.r.x += c.w.x * dt; c.r.y += c.w.y * dt; c.r.z += c.w.z * dt;
       const s = c.size * Math.min(1, (c.life / c.max) * 3);
       tmpQ.setFromEuler(c.r);
@@ -461,7 +422,7 @@ export class Stage {
       r.life -= dt;
       if (r.life <= 0) { r.visible = false; continue; }
       const e = 1 - r.life / 0.75;
-      const s = rad * (0.35 + easeOutCubic(e) * 0.65); // across the turntable to its rim, never past the stage's edges
+      const s = rad * (0.35 + easeOutCubic(e) * 0.65); // out to the sculpture's reach, never past the stage's edges
       r.scale.set(s, s, 1);
       r.material.opacity = 0.9 * (1 - e);
     }

@@ -62,13 +62,13 @@ class Sculpt {
     return [[1, 0, 0], [-1, 0, 0], [0, 1, 0], [0, -1, 0], [0, 0, 1], [0, 0, -1]].some(([a, b, c]) => !this.get(x + a, y + b, z + c));
   }
   // How many cubes lie between this one and the outside: 0 for a cube with a face on the air (the
-  // turntable under the sculpture is not air, as in the game), 1 for one touching only those, and
-  // so on (null where there is no cube). Kept until a cube is added or removed; recolouring keeps it.
+  // underside too: the sculpture floats, as in the game), 1 for one touching only those, and so on
+  // (null where there is no cube). Kept until a cube is added or removed; recolouring keeps it.
   depth(x, y, z) {
     if (!this.depths) {
       const { sx, sy, sz } = this;
       const d = new Int16Array(this.cells.length).fill(-1);
-      const open = (x, y, z) => [[1, 0, 0], [-1, 0, 0], [0, 1, 0], [0, -1, 0], [0, 0, 1], [0, 0, -1]].some(([a, b, c]) => y + b >= 0 && !this.get(x + a, y + b, z + c));
+      const open = (x, y, z) => [[1, 0, 0], [-1, 0, 0], [0, 1, 0], [0, -1, 0], [0, 0, 1], [0, 0, -1]].some(([a, b, c]) => !this.get(x + a, y + b, z + c));
       let ring = [];
       this.each((x, y, z, cur) => { if (cur && open(x, y, z)) { d[x + sx * (y + sy * z)] = 0; ring.push([x, y, z]); } });
       for (let k = 1; ring.length; k++) {
@@ -511,7 +511,310 @@ function patchwork() {
   return s.done();
 }
 
+// ---------- the floating sculptures (Work item 9nov) ----------
+// Built to float, with nothing under them, and to be seen from every side and from below: cages
+// whose bars hide what is inside from some angles and not others, windows that show an inside
+// only at a slant, and parts that stick out, whose undersides show only from below.
+
+// Shapes the sculptures below are built from; each fills the cells whose middle falls inside.
+const box = (s, x0, x1, y0, y1, z0, z1, c) => s.fill((x, y, z) => x >= x0 && x <= x1 && y >= y0 && y <= y1 && z >= z0 && z <= z1, c);
+const ball = (s, cx, cy, cz, rx, ry, rz, c, keep = () => true) =>
+  s.fill((x, y, z) => sq(x - cx) / sq(rx) + sq(y - cy) / sq(ry) + sq(z - cz) / sq(rz) <= 1 && keep(x, y, z), c);
+// A rod of radius r from point a to point b, round at both ends.
+const rod = (s, a, b, r, c) => {
+  const d = [b[0] - a[0], b[1] - a[1], b[2] - a[2]], L2 = sq(d[0]) + sq(d[1]) + sq(d[2]) || 1;
+  s.fill((x, y, z) => {
+    const t = Math.max(0, Math.min(1, ((x - a[0]) * d[0] + (y - a[1]) * d[1] + (z - a[2]) * d[2]) / L2));
+    return sq(x - a[0] - t * d[0]) + sq(y - a[1] - t * d[1]) + sq(z - a[2] - t * d[2]) <= sq(r);
+  }, c);
+};
+// Rods through the points in turn; r may be a function of the rod's number (1, 2, ...).
+const path = (s, pts, r, c) => { for (let k = 1; k < pts.length; k++) rod(s, pts[k - 1], pts[k], typeof r === 'function' ? r(k) : r, c); };
+// A hoop round the axis ('x', 'y' or 'z') through (cx, cy, cz): radius R, its rod radius r.
+const hoop = (s, cx, cy, cz, axis, R, r, c, keep = () => true) => s.fill((x, y, z) => {
+  const [u, v, w] = axis === 'y' ? [x - cx, z - cz, y - cy] : axis === 'x' ? [y - cy, z - cz, x - cx] : [x - cx, y - cy, z - cz];
+  return sq(Math.hypot(u, v) - R) + sq(w) <= sq(r) && keep(x, y, z);
+}, c);
+const ring2 = (x, z, cx, cz) => Math.max(Math.abs(x - cx), Math.abs(z - cz)); // square rings round a middle
+
+// A gold birdcage: a thick drum for a floor, twelve bars over a dome, a bird on its perch inside.
+// The drum is teal inside, then blue: the colours of the bird's tail and body, so their crew look
+// ready from the start though most of their cubes are sealed in the drum.
+function birdcage() {
+  const s = new Sculpt(19, 26, 19), C = 9, R = 7.6;
+  s.fill((x, y, z) => y <= 5 && Math.hypot(x - C, z - C) <= R + 0.4, 'brown');
+  for (const y0 of [0, 8, 15]) hoop(s, C, y0, C, 'y', R, 0.6, 'yellow');
+  for (let k = 0; k < 12; k++) {
+    const a = (k / 12) * Math.PI * 2, ca = Math.cos(a), sa = Math.sin(a);
+    rod(s, [C + R * ca, 0, C + R * sa], [C + R * ca, 15, C + R * sa], 0.55, 'yellow');
+    const pts = [];
+    for (let t = 0; t <= 8; t++) { const b = (t / 8) * (Math.PI / 2); pts.push([C + R * Math.cos(b) * ca, 15 + R * 0.8 * Math.sin(b), C + R * Math.cos(b) * sa]); }
+    path(s, pts, 0.55, 'yellow');
+  }
+  hoop(s, C, 23, C, 'z', 1.4, 0.55, 'charcoal', (x, y) => y >= 22);
+  rod(s, [C, 21, C], [C, 22, C], 0.6, 'charcoal');
+  rod(s, [C - R, 7, C], [C + R, 7, C], 0.8, 'brown'); // the perch
+  ball(s, C, 11, C - 0.5, 3.2, 3.4, 4, 'blue');
+  ball(s, C, 15.5, C + 2.5, 2.5, 2.5, 2.5, 'blue');
+  s.paint((x, y, z, cur) => cur === 'blue' && y <= 12 && z >= C + 1, 'white'); // the breast
+  rod(s, [C, 15.5, C + 4.5], [C, 15, C + 6.5], 0.7, 'orange');
+  for (const ex of [C - 1.5, C + 1.5]) s.set(ex, 16, C + 4.5, 'charcoal');
+  rod(s, [C, 11, C - 4], [C, 8, C - 7], 1.2, 'teal'); // the tail
+  box(s, C + 3, C + 5, 6, 7, C - 5, C - 3, 'red'); // a seed cup
+  s.bands(['yellow', 'red', 'green'], (x, y, z, cur) => cur === 'blue' || cur === 'white');
+  s.bands(['teal', 'blue'], (x, y, z, cur) => cur === 'brown');
+  return s.done();
+}
+
+// A lantern: glass walls in a dark frame, open panes high up, a candle inside, a roof with eaves.
+function lantern() {
+  const s = new Sculpt(15, 25, 15), lo = 2, hi = 12, M = 7;
+  box(s, 1, 13, 0, 2, 1, 13, 'brown');
+  const wall = (x, z) => x >= lo && x <= hi && z >= lo && z <= hi && (x === lo || x === hi || z === lo || z === hi);
+  s.fill((x, y, z) => y >= 3 && y <= 14 && wall(x, z), 'yellow');
+  s.paint((x, y, z) => y >= 3 && y <= 14 && wall(x, z) && (((x === lo || x === hi) && (z === lo || z === hi)) || y === 3 || y === 9 || y === 14 || x === M || z === M), 'charcoal');
+  const pane = v => (v >= 4 && v <= 5) || (v >= 9 && v <= 10);
+  s.fill((x, y, z) => y >= 10 && y <= 13 && (((z === lo || z === hi) && pane(x)) || ((x === lo || x === hi) && pane(z))), null);
+  s.fill((x, y, z) => y >= 3 && y <= 8 && Math.hypot(x - M, z - M) <= 2.6, 'white'); // the candle
+  ball(s, M, 10.5, M, 1.2, 2, 1.2, 'orange'); // its flame
+  s.fill((x, y, z) => y >= 15 && y <= 19 && ring2(x, z, M, M) <= 7 - (y - 15) * 1.5, 'red');
+  s.set(M, 20, M, 'charcoal');
+  hoop(s, M, 22, M, 'z', 2, 0.55, 'charcoal', (x, y) => y >= 21);
+  s.bands(['red', 'yellow'], (x, y, z, cur) => cur === 'white');
+  s.bands(['charcoal', 'green'], (x, y, z, cur) => cur === 'brown');
+  s.bands(['yellow', 'white'], (x, y, z, cur) => cur === 'red');
+  return s.done();
+}
+
+// A jellyfish: a thick pink bell with a small hollow underneath, a stomach glowing in it, frilly
+// arms and long tentacles hanging below. Inside the bell, lilac (the arms' colour), then teal (the
+// tentacles'), then orange (the stomach's): crew of those colours look ready from the start, but
+// most of their cubes are sealed in the bell.
+function jellyfish() {
+  const s = new Sculpt(19, 20, 19), C = 9;
+  s.fill((x, y, z) => { const d = Math.hypot(x - C, (y - 9) * 1.15, z - C); return y >= 9 && d <= 8.6 && d >= 3.2; }, 'pink');
+  s.fill((x, y, z) => y === 8 && Math.abs(Math.hypot(x - C, z - C) - 7) <= 0.9 && Math.floor((Math.atan2(z - C, x - C) + Math.PI) / (Math.PI / 8)) % 2 === 0, 'pink');
+  rod(s, [C, 10, C], [C, 12, C], 0.8, 'orange');
+  hoop(s, C, 10, C, 'y', 2, 0.9, 'orange');
+  for (let k = 0; k < 4; k++) {
+    const a = (k * Math.PI) / 2 + Math.PI / 4, pts = [];
+    for (let y = 9; y >= 0; y--) pts.push([C + 1.8 * Math.cos(a) + Math.sin(y * 0.9 + k) * 0.8, y, C + 1.8 * Math.sin(a) + Math.cos(y * 0.9 + k) * 0.8]);
+    path(s, pts, 0.9, 'lilac');
+  }
+  for (let k = 0; k < 8; k++) {
+    const a = (k * Math.PI) / 4, pts = [];
+    for (let y = 8; y >= 1; y--) { const r = 6.8 - (8 - y) * 0.2 + Math.sin(y + k) * 0.5; pts.push([C + r * Math.cos(a), y, C + r * Math.sin(a)]); }
+    path(s, pts, 0.55, 'teal');
+  }
+  s.bands(['lilac', 'teal', 'orange', 'blue'], (x, y, z, cur) => cur === 'pink');
+  return s.done();
+}
+
+// An airship: a striped envelope with fins, a cabin with windows hanging under it on struts.
+function airship() {
+  const s = new Sculpt(29, 17, 15), Z = 7;
+  ball(s, 15, 11, Z, 13, 5, 6, 'red');
+  s.paint((x, y, z, cur) => cur === 'red' && (x % 4 === 0 || x >= 26), 'white');
+  s.fill((x, y, z) => z === Z && x <= 5 && Math.abs(y - 11) <= 5.5 - x * 0.5 && Math.abs(y - 11) >= 1, 'white');
+  s.fill((x, y, z) => y === 11 && x <= 5 && Math.abs(z - Z) <= 6.5 - x * 0.7, 'white');
+  box(s, 11, 19, 1, 4, 4, 10, 'brown');
+  box(s, 12, 18, 2, 3, 5, 9, null);
+  s.fill((x, y, z) => (z === 4 || z === 10) && y >= 2 && y <= 3 && x >= 12 && x <= 18 && x % 2 === 0, null);
+  box(s, 13, 14, 2, 2, 6, 8, 'yellow'); // the pilot's seats
+  for (const px of [12, 18]) rod(s, [px, 4, Z], [px, 6.5, Z], 0.6, 'charcoal');
+  rod(s, [10, 2.5, 4.5], [10, 2.5, 9.5], 0.5, 'charcoal');
+  rod(s, [10, 0.5, Z], [10, 4.5, Z], 0.5, 'charcoal');
+  s.bands(['teal', 'orange', 'yellow'], (x, y, z, cur) => cur === 'red' || cur === 'white');
+  return s.done();
+}
+
+// A pagoda: three solid storeys with dark window niches on every side, under thin roofs whose eaves
+// stick far out, a teal bell hanging under each eave's corner. Inside, a charcoal layer (the colour
+// of the spire and the window backs), then teal (the bells' colour), then an orange core: crew of
+// those colours look ready from the start, but most of their cubes are sealed deep.
+function pagoda() {
+  const s = new Sculpt(21, 25, 21), C = 10;
+  for (let k = 0; k < 3; k++) {
+    const w = 6 - k, y0 = k * 7, e = w + 2;
+    s.fill((x, y, z) => y === y0 && ring2(x, z, C, C) <= w, 'brown');
+    s.fill((x, y, z) => y > y0 && y <= y0 + 4 && ring2(x, z, C, C) <= w, 'white');
+    s.fill((x, y, z) => y === y0 + 5 && ring2(x, z, C, C) <= e, 'red');
+    s.fill((x, y, z) => y === y0 + 6 && ring2(x, z, C, C) <= w - 1, 'red');
+    for (const [dx, dz] of [[-1, -1], [-1, 1], [1, -1], [1, 1]]) {
+      s.set(C + dx * e, y0 + 6, C + dz * e, 'red');
+      s.set(C + dx * e, y0 + 4, C + dz * e, 'teal');
+    }
+  }
+  rod(s, [C, 21, C], [C, 23, C], 0.7, 'charcoal');
+  s.set(C, 24, C, 'yellow');
+  s.bands(['charcoal', 'teal', 'orange'], (x, y, z, cur) => cur === 'white' || cur === 'brown');
+  s.bands(['yellow'], (x, y, z, cur) => cur === 'red');
+  // the window niches, cut after the layers so each shows the charcoal behind the wall
+  for (let k = 0; k < 3; k++) {
+    const w = 6 - k, y0 = k * 7;
+    s.fill((x, y, z) => y >= y0 + 2 && y <= y0 + 3 && ring2(x, z, C, C) === w && Math.min(Math.abs(x - C), Math.abs(z - C)) <= 1, null);
+  }
+  return s.done();
+}
+
+// A teapot: a round body with a white band, a spout, a handle you can see through, a lid and knob.
+function teapot() {
+  const s = new Sculpt(23, 15, 15), cx = 11, cz = 7;
+  ball(s, cx, 6, cz, 5.6, 5.5, 5.6, 'blue');
+  s.paint((x, y) => y === 6 || y === 7, 'white');
+  ball(s, cx, 11, cz, 3.6, 1.6, 3.6, 'blue', (x, y) => y >= 11);
+  ball(s, cx, 13, cz, 1.2, 1.2, 1.2, 'yellow');
+  path(s, [[15, 4, cz], [18, 6, cz], [20, 9, cz], [21.5, 10, cz]], 1.1, 'blue');
+  hoop(s, 3.8, 7, cz, 'z', 3.4, 0.8, 'blue', x => x <= 6);
+  s.bands(['teal', 'blue', 'brown', 'orange']);
+  return s.done();
+}
+
+// An atom: a nucleus of red and green, caged by three rings, each with its electron.
+function atom() {
+  const s = new Sculpt(23, 23, 23), C = 11;
+  ball(s, C, C, C, 5.2, 5.2, 5.2, 'red');
+  s.paint((x, y, z) => hash(x, y, z) < 0.5, 'green');
+  hoop(s, C, C, C, 'y', 9, 0.7, 'blue');
+  hoop(s, C, C, C, 'x', 9, 0.7, 'yellow');
+  hoop(s, C, C, C, 'z', 9, 0.7, 'teal');
+  const e = 9 / Math.SQRT2;
+  for (const [x, y, z] of [[C + e, C, C + e], [C, C + e, C - e], [C - e, C - e, C]]) ball(s, x, y, z, 1.4, 1.4, 1.4, 'white');
+  s.bands(['yellow', 'blue', 'orange'], (x, y, z, cur) => cur === 'red' || cur === 'green');
+  return s.done();
+}
+
+// A treehouse: roots, a trunk through a wide platform, a house with windows round the trunk, a
+// roof, a ladder under the platform, and a crown of leaves.
+function treehouse() {
+  const s = new Sculpt(21, 27, 21), C = 10;
+  for (let k = 0; k < 5; k++) {
+    const a = (k * 2 * Math.PI) / 5;
+    path(s, [[C, 4, C], [C + 3 * Math.cos(a), 1.5, C + 3 * Math.sin(a)], [C + 5 * Math.cos(a), 0, C + 5 * Math.sin(a)]], 0.8, 'brown');
+  }
+  s.fill((x, y, z) => y === 9 && Math.hypot(x - C, z - C) <= 8.3, 'grey');
+  box(s, C - 4, C + 4, 10, 15, C - 4, C + 4, 'orange');
+  box(s, C - 3, C + 3, 10, 15, C - 3, C + 3, null);
+  s.fill((x, y, z) => y >= 12 && y <= 13 && ring2(x, z, C, C) === 4 && Math.min(Math.abs(x - C), Math.abs(z - C)) <= 1, null);
+  s.fill((x, y, z) => y <= 17 && Math.hypot(x - C, z - C) <= 2.2, 'brown'); // the trunk, through it all
+  ball(s, C + 2.5, 11, C - 2.5, 0.9, 0.9, 0.9, 'yellow'); // a lamp
+  s.fill((x, y, z) => y >= 16 && y <= 19 && ring2(x, z, C, C) <= 5.5 - (y - 16) * 1.5, 'red');
+  ball(s, C, 22, C, 6, 4, 6, 'green');
+  ball(s, C - 5, 19, C + 2, 3, 2.5, 3, 'green');
+  ball(s, C + 5, 20, C - 3, 3, 2.5, 3, 'green');
+  for (const lx of [C - 1, C + 1]) rod(s, [lx, 0, C + 8.5], [lx, 8, C + 8.5], 0.5, 'grey');
+  for (let y = 1; y <= 7; y += 2) rod(s, [C - 1, y, C + 8.5], [C + 1, y, C + 8.5], 0.5, 'grey');
+  s.bands(['teal', 'orange', 'lilac'], (x, y, z, cur) => cur === 'green');
+  s.bands(['charcoal'], (x, y, z, cur) => cur === 'brown');
+  return s.done();
+}
+
+// An hourglass: a frame of plates and posts, the glass as hoops and ribs, the sand running down.
+function hourglass() {
+  const s = new Sculpt(15, 23, 15), C = 7;
+  const r = y => 1 + 5.5 * Math.pow(Math.abs(y - 11) / 10, 0.6);
+  box(s, 0, 14, 0, 0, 0, 14, 'brown');
+  box(s, 0, 14, 22, 22, 0, 14, 'brown');
+  for (const [px, pz] of [[0, 0], [0, 14], [14, 0], [14, 14]]) box(s, px, px, 1, 21, pz, pz, 'brown');
+  s.fill((x, y, z) => y >= 1 && y <= 21 && Math.abs(Math.hypot(x - C, z - C) - r(y)) <= 0.6 && (y % 2 === 1 || x === C || z === C), 'teal');
+  s.fill((x, y, z) => y >= 12 && y <= 16 && Math.hypot(x - C, z - C) <= r(y) - 1, 'yellow');
+  s.fill((x, y, z) => y >= 7 && y <= 11 && x === C && z === C, 'yellow');
+  s.fill((x, y, z) => y >= 1 && y <= 6 && Math.hypot(x - C, z - C) <= (6.5 - y) * 0.9, 'yellow');
+  s.bands(['orange', 'teal', 'red'], (x, y, z, cur) => cur === 'yellow');
+  return s.done();
+}
+
+// An octopus: a round head with big eyes, eight arms curling out and up, suckers under them.
+function octopus() {
+  const s = new Sculpt(23, 17, 23), C = 11;
+  ball(s, C, 11, C, 5, 5, 5.5, 'purple');
+  for (const ex of [C - 2, C + 2]) { ball(s, ex, 11, C + 4.6, 1.3, 1.3, 1, 'white'); s.set(ex, 11, C + 5.6, 'charcoal'); }
+  for (let k = 0; k < 8; k++) {
+    const pts = [];
+    for (let t = 0; t <= 1.0001; t += 0.125) {
+      const a = (k * Math.PI) / 4 + Math.PI / 8 + 0.35 * t, r = 3 + 6.5 * t;
+      pts.push([C + r * Math.cos(a), 6.5 - 5.5 * t + (t > 0.75 ? (t - 0.75) * 12 : 0), C + r * Math.sin(a)]);
+    }
+    path(s, pts, j => 1.4 - 0.08 * j, 'purple');
+  }
+  s.paint((x, y, z, cur) => cur === 'purple' && y <= 6 && !s.get(x, y - 1, z) && hash(x, y, z) < 0.6, 'pink');
+  s.bands(['pink', 'red', 'yellow'], (x, y, z, cur) => y >= 6 && cur === 'purple');
+  return s.done();
+}
+
+// A windmill: a tower with windows and an open entrance, a cap, and four sails of open lattice.
+// Inside the tower, orange (the sails' cloth), then brown (their frames), then grey and green: crew
+// of the sails' colours look ready from the start, but most of their cubes are sealed in the tower.
+function windmill() {
+  const s = new Sculpt(23, 26, 17), cx = 11, cz = 7, hy = 15;
+  s.fill((x, y, z) => y <= 16 && Math.hypot(x - cx, z - cz) <= 5 - y * 0.12, 'white');
+  const r0 = y => 5 - y * 0.12;
+  s.fill((x, y, z) => [6, 7, 11, 12].includes(y) && Math.abs(x - cx) <= 1 && Math.abs(z - cz) >= r0(y) - 1.6, null); // windows
+  s.fill((x, y, z) => (y === 9 || y === 10) && Math.abs(z - cz) <= 1 && Math.abs(x - cx) >= r0(y) - 1.6, null);
+  s.fill((x, y, z) => y <= 2 && Math.abs(x - cx) <= 1 && z - cz >= r0(y) - 2, null); // the doorway
+  s.paint((x, y, z) => y === 4 || y === 14, 'grey'); // bands of stone round the tower
+  ball(s, cx, 17, cz, 5, 4, 5, 'red', (x, y) => y >= 17);
+  rod(s, [cx, hy, cz + 3], [cx, hy, cz + 8], 0.7, 'charcoal');
+  for (let k = 0; k < 4; k++) {
+    const a = (k * Math.PI) / 2 + Math.PI / 4, ca = Math.cos(a), sa = Math.sin(a);
+    s.each((x, y, z) => {
+      if (z !== cz + 8) return undefined;
+      const u = (x - cx) * ca + (y - hy) * sa, v = -(x - cx) * sa + (y - hy) * ca;
+      if (u < 0 || u > 10 || v < -0.5 || v > 3.6) return undefined;
+      if (Math.abs(v) <= 0.5) return 'brown'; // the spar
+      if (u < 1.5) return undefined;
+      if (u > 9.3 || v > 3.1) return 'brown'; // the sail's frame
+      return (x + y) % 3 !== 0 ? 'orange' : undefined; // its cloth, a lattice you can see through
+    });
+  }
+  s.bands(['orange', 'brown', 'grey', 'green'], (x, y, z, cur) => cur === 'white' || cur === 'red' || cur === 'grey');
+  return s.done();
+}
+
+// A space station: a hub, a ring of cabins with windows on four spokes, solar panels on a mast,
+// and a docking pod underneath.
+function station() {
+  const s = new Sculpt(25, 19, 25), C = 12, Y = 9;
+  s.fill((x, y, z) => y >= 3 && y <= 15 && Math.hypot(x - C, z - C) <= 3.6, 'grey');
+  hoop(s, C, Y, C, 'y', 10, 1.6, 'white');
+  s.paint((x, y, z, cur) => cur === 'white' && y === Y && Math.hypot(x - C, z - C) > 10.8 && Math.floor((Math.atan2(z - C, x - C) + Math.PI) / (Math.PI / 12)) % 2 === 0, 'charcoal');
+  for (let k = 0; k < 4; k++) {
+    const a = (k * Math.PI) / 2, ca = Math.cos(a), sa = Math.sin(a);
+    rod(s, [C + 2.5 * ca, Y, C + 2.5 * sa], [C + 8.6 * ca, Y, C + 8.6 * sa], 0.9, 'grey');
+  }
+  rod(s, [C, 15, C], [C, 18, C], 0.6, 'grey');
+  s.fill((x, y, z) => y === 17 && Math.abs(z - C) <= 2 && Math.abs(x - C) >= 2 && Math.abs(x - C) <= 10 && (x % 2 === 0 || Math.abs(z - C) === 2), 'blue');
+  ball(s, C, 1.5, C, 2, 1.6, 2, 'orange');
+  s.bands(['orange', 'blue', 'yellow'], (x, y, z, cur) => cur === 'grey');
+  s.bands(['yellow'], (x, y, z, cur) => cur === 'white');
+  return s.done();
+}
+
+// A submarine: a long hull in yellow and grey plating with white portholes, a tower with a
+// periscope, fins at the stern and an orange propeller. Inside the hull, white (the portholes'
+// colour), then orange (the propeller's), then teal: crew of those colours look ready from the
+// start, but most of their cubes are sealed in the hull.
+function submarine() {
+  const s = new Sculpt(29, 16, 13), Z = 6;
+  ball(s, 15, 7, Z, 13, 4.6, 5, 'yellow');
+  s.paint((x, y, z, cur) => cur === 'yellow' && x % 5 === 0, 'grey');
+  box(s, 13, 18, 11, 13, 5, 7, 'grey');
+  s.fill((x, y, z) => y === 12 && (z === 5 || z === 7) && (x === 14 || x === 16), null); // the tower's windows
+  s.fill((x, y, z) => y === 12 && z >= 3 && z <= 9 && x >= 15 && x <= 16 && (z < 5 || z > 7), 'grey'); // its planes
+  rod(s, [16, 13, Z], [16, 15, Z], 0.6, 'charcoal');
+  s.fill((x, y, z) => z === Z && x >= 1 && x <= 4 && Math.abs(y - 7) <= 5.5 - x * 0.6 && Math.abs(y - 7) >= 1, 'grey'); // the rudder
+  s.fill((x, y, z) => y === 7 && x >= 1 && x <= 4 && Math.abs(z - Z) <= 6 - x * 0.7 && Math.abs(z - Z) >= 1, 'grey'); // the hydroplanes
+  for (let k = 0; k < 3; k++) {
+    const a = (k * 2 * Math.PI) / 3 + 0.3;
+    rod(s, [0, 7, Z], [0, 7 + 3.4 * Math.cos(a), Z + 3.4 * Math.sin(a)], 0.6, 'orange'); // the propeller
+  }
+  s.paint((x, y, z, cur) => cur === 'yellow' && (y === 7 || y === 8) && x % 4 === 2 && x >= 6 && x <= 24 && Math.abs(z - Z) >= 3.5, 'white'); // portholes
+  s.bands(['teal', 'orange', 'white'], (x, y, z, cur) => cur === 'yellow' || cur === 'grey');
+  return s.done();
+}
+
 export const MODELS = {
   mushroom, duck, cactus, rocket, penguin, balloon, lighthouse, robot, planet, castle, dolls,
   cupcake, burger, fish, gift, tree, melon, snowman, house, patchwork,
+  birdcage, lantern, jellyfish, airship, pagoda, teapot, atom, treehouse, hourglass, octopus, windmill, station, submarine,
 };

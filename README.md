@@ -3,11 +3,12 @@
 A cube-popping puzzle. A sculpture made of coloured cubes turns in the middle. Tap the front
 crew member of a line to send it up to a launch pad, where it pops cubes of its colour until
 its number runs out. A crew member hits only cubes you can see: a cube with a face on the open
-air around the sculpture, turned to the camera, with nothing of the sculpture or the turntable
+air around the sculpture, turned to the camera, with no other cube
 between some part of that face and the camera, whether straight on, at a slant into a notch, under
 a part that sticks out, or from below. The cubes stand flush, so nothing behind them shows
-through. The sculpture turns on its turntable, so its sides come round in turn; drag it to turn it
-yourself, and drag up or down to tilt the camera, from below the turntable to almost straight
+through. The sculpture floats in the air, with nothing under it, and turns, so its sides come
+round in turn and its underside can be hit when you look from below; drag it to turn it
+yourself, and drag up or down to tilt the camera, from below it to almost straight
 down. Crew who have waited a while with nothing of theirs in
 view make the camera look higher, then lower (into a pit, under a part that sticks out); only
 after about 17 seconds of that may a shot take a cube out of sight. So the sculpture is eaten
@@ -116,7 +117,7 @@ Play: https://chrisshawyeah.github.io/voxel-pop/
   address follows the level being played instead.
 - Drag the sculpture sideways to turn it all the way round, up or down to tilt the camera from below
   it to almost straight above. A flick keeps turning a
-  little; the turntable stays still for a moment after you let go, then takes up its own turn
+  little; the sculpture stays still for a moment after you let go, then takes up its own turn
   again. While you hold it the crew aim at what you see, and a saved attempt keeps every turn, so
   it comes back to the same cubes.
 - The crew buttons work with a tap, a click, or Tab then Enter or Space.
@@ -142,7 +143,7 @@ No build step and nothing to install. Every file is plain JavaScript the browser
 | The look of the crew, pads, top bar and short-window layout | `css/game.css` |
 | Sounds | `js/audio.js` (every sound is made in code). Ordinary pops are soft and at most about 9 a second (`POP_GAP`); the bright rising notes are for a crew member finishing, a colour cleared and a win. |
 | The 3D look: cubes, lights, camera framing, chips, puffs, the build at a level's start | `js/render.js` |
-| Turning and tilting by hand | the view section of `js/main.js` (`TURN_PX`, `TILT_PX`, `FLING`, `REST`); the turntable's own turn, the camera's range and how long crew wait before the camera looks around are `TURN`, `PITCH_MIN`/`PITCH_MAX`, `SEEK`, `LOOK` and `STALL` in `js/logic.js` |
+| Turning and tilting by hand | the view section of `js/main.js` (`TURN_PX`, `TILT_PX`, `FLING`, `REST`); the sculpture's own turn, the camera's range and how long crew wait before the camera looks around are `TURN`, `PITCH_MIN`/`PITCH_MAX`, `SEEK`, `LOOK` and `STALL` in `js/logic.js` |
 
 To try a change on your own computer, serve the folder and open it (the page loads modules,
 so opening `index.html` straight from the disk does not work):
@@ -169,14 +170,16 @@ most 30 seconds to fire (`firingTime()`, on the game's clock).
 
 The curve is the forecast follower's win rate, level by level: each level's `follow` band in
 `js/levels.js`, and `undos`, the most undos the follower with undo may need in its median won play.
-Levels 1 to 3 teach (95 to 100%), 4 to 8 rise gently (within 75 to 90%), 9 to 14 are the middle
-(within 45 to 70%), 15 to 20 are hard (within 25 to 45%), each band a little lower than the one
-before, and level 17, the melon, is the one breather (60 to 80%). No level may be more than 20
-points easier for the follower than the level before it, except a level whose band sits wholly
-above the one before (the breather); the median undos stay at most 3 up to level 12 and at most 6
-after, and from one level to the next rise by at most 3 and fall by at most 1 (the breather left
-out). The median jumps from 0 to a level's full depth once the follower wins less than half the
-time, which is why one level may rise by 3 at once (the tree, level 14, at 3; then 4 and 5).
+Levels 1 to 3 teach (95 to 100%), 4 to 8 rise gently (within 75 to 90%), 9 to 13 are the middle
+(the follower wins from three plays in four down to one in two, with no undo needed), 14 to 20 are
+hard (from one play in two down to about one in four, three to five undos), each band a little
+lower than the one before, and level 19, the lantern, is the one breather (95 to 100%) before the
+atom ends the game. No level may be more than 20 points easier for the follower than the level
+before it, except a level whose band sits wholly above the one before (the breather); the median
+undos stay at most 3 up to level 12 and at most 6 after, and from one level to the next rise by at
+most 4 and fall by at most 1 (the breather left out). The median jumps from 0 to a level's full
+depth once the follower wins less than half the time, which is why one level may rise by 3 at once
+(the hourglass, level 14, at 3; then 4 and 5).
 `curveMisses()` in `tools/players.mjs` checks it all; the tests and the deal picker both use it.
 
 Since a crew member can hit its colour from any side, a colour all on the outside never makes
@@ -186,10 +189,23 @@ for each layer, which look the same from outside. Levels 2 and 3 open on purpose
 unlocking: the duck has foam over its back and more foam, an orange squeaker and a black weight
 under a layer of pink rubber; the penguin has its orange fish, more red and more white under a
 layer of blue ice. A crew member of those colours pops what shows and then waits on its pad for
-the rest, each level with three pads. Level 17, the melon, is a small breather between the dolls
-and the castle.
+the rest, each level with three pads.
 
-After changing a level's settings, pick a deal for them, then check every level:
+Levels 9 to 20 are twelve floating sculptures with cages, windows and overhangs (the treehouse,
+teapot, birdcage, submarine, jellyfish, hourglass, space station, windmill, pagoda, airship,
+lantern and atom), and each is built around planned hard moments. Its crew are written out by
+hand (`lines` in `js/levels.js`), with a winning order of sends (`solution`) and its `traps`: one
+to three moments along that order where sending another line, whose front crew member looks ready
+because cubes of its colour show, loses, though the level is still won by the right send. The
+sculptures make those moments: a colour that shows outside only on a thin part (the bird's tail,
+the windmill's sails, the pagoda's bells, the submarine's portholes) fills a thick layer sealed deep
+inside, so its crew pop what shows and then wait on a pad. `node tools/traps.mjs check` proves
+every planned trap still loses (the tests run the same check), `node tools/traps.mjs find 14`
+lists the traps along level 14's solution, and `node tools/traps.mjs search <sculpture> --measure`
+deals a sculpture over and over and prints, as lines to copy in, each deal with one to three trap
+moments whose winning line holds and fires within 30 seconds, with its measures.
+
+After changing a dealt level's settings (levels 1 to 8), pick a deal for them, then check every level:
 
     node tools/pick-deals.mjs 12            # level 12: prints its new line to copy in
     node tools/pick-deals.mjs 12 --write    # ... and writes it into js/levels.js

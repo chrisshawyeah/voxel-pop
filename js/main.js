@@ -998,23 +998,23 @@ window.addEventListener('pageshow', e => { if (e.persisted) checkForUpdate(); })
 // ---------- the view: the player turns and tilts the sculpture ----------
 // The crew hit only what the camera sees, so the view is part of the board (st.yaw, st.pitch and
 // st.spin in js/logic.js) and the screen draws the board's view, smoothed between ticks. A finger
-// or a mouse on the sculpture takes the view: sideways turns the turntable, up and down tilts the
+// or a mouse on the sculpture takes the view: sideways turns the sculpture, up and down tilts the
 // camera, and before every tick while it is held the board takes the view the player sees
 // (att.view, kept in the attempt, so a saved attempt plays back to the same cubes). Let go, a
-// flick keeps it turning a moment; then it rests, and the turntable takes up its own turn again,
+// flick keeps it turning a moment; then it rests, and the sculpture takes up its own turn again,
 // gently. Between levels and when out of room nothing ticks, and it just turns.
 const TURN_PX = 0.011;  // radians of turn per pixel dragged sideways
 const TILT_PX = 0.007;  // radians of tilt per pixel dragged up or down
 const FLING = 2.4;      // the fastest turn a flick leaves, radians a second
 const REST = 0.9;       // seconds the sculpture stays still after a drag before turning on its own
-const YAW_FOLLOW = 8;   // turntable steps (0.7 degrees) the hand moves before the board takes the new view
+const YAW_FOLLOW = 8;   // turning steps (0.7 degrees) the hand moves before the board takes the new view
 const look = { yaw: R.yawRad(R.START_YAW), pitch: R.pitchRad(R.START_PITCH), hand: 'auto', vy: 0, vp: 0, rest: 0 };
 const wrapPi = a => a - 2 * Math.PI * Math.round(a / (2 * Math.PI));
 const tilted = p => Math.max(R.PITCH_MIN, Math.min(R.PITCH_MAX, p));
 
 // Before each tick: while the player has the sculpture (dragging, a flick, the rest after it), the
-// board takes their view, as far as the rules can tell (the turntable's step, the camera's height,
-// standing still); after the rest the turntable's own turn comes back one step every other tick.
+// board takes their view, as far as the rules can tell (the sculpture's turning step, the camera's height,
+// standing still); after the rest the sculpture's own turn comes back one step every other tick.
 function viewBeforeTick() {
   if (look.hand === 'auto') return;
   if (look.hand === 'ramp') {
@@ -1057,7 +1057,7 @@ function showView(dt) {
     }
   } else if (look.hand !== 'drag') {
     if (state === 'play' && st) {
-      // Where the rules' turntable is between two ticks; any gap to it closes in about 0.2 s.
+      // Where the rules' sculpture has turned to between two ticks; any gap to it closes in about 0.2 s.
       const wantY = R.yawRad(st.yaw + (st.hold > 0 ? 0 : st.spin) * (clock / FIRE_GAP)), wantP = R.pitchRad(st.pitch);
       const k = Math.exp(-dt * 12);
       look.yaw = wantY + wrapPi(look.yaw - wantY) * k;

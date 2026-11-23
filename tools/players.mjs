@@ -1,5 +1,5 @@
 // Test players for measuring a level, using the same rules and ticks as the game (js/logic.js).
-// The turntable turns on its own in every one of them (the board's st.spin), so a crew member
+// The sculpture turns on its own in every one of them (the board's st.spin), so a crew member
 // whose colour is round the back waits for it, as in the game.
 // greedy and plan wait for the pads to stop before each send; playLine, hastyGreedy and
 // hastyForecast (below) send while shots are still in the air, with the game's landing pause and
@@ -235,11 +235,11 @@ export function backtrack(board, rand, cap = 50, land = LAND) {
 // follower (forecastCheck: forecastFirst, never undoing) must win, and its `undos` the most undos
 // the median won play of the follower with undo (backtrackCheck) may take. Then, from one level to
 // the next: the forecast follower may win at most STEP_MAX points more than on the level before,
-// unless the level's band sits wholly above the band before it (a breather, like the melon); and
+// unless the level's band sits wholly above the band before it (a breather, like the lantern); and
 // the median undos may rise by at most UNDO_RISE over the level before's and fall by at most
 // UNDO_FALL, so they climb in small steps (a breather is left out: the level after it is compared
 // with the level before it). The median jumps from 0 to a level's full depth once the follower
-// wins less than half the time, so the first hard level may rise by 4 (House after Tree; decided on
+// wins less than half the time, so the first hard level may rise by 4 (decided on
 // Work item 8.1nov, November 22nd). curveMisses() lists what a set of measures
 // breaks; the tests, tools/difficulty.mjs and tools/pick-deals.mjs all use it.
 export const STEP_MAX = 20;
