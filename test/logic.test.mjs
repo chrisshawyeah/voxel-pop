@@ -4,7 +4,8 @@ import { readFileSync } from 'node:fs';
 import { spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import { makeBoard, cloneBoard, removeCube, deploy, fire, step, settle, launch, target, isJammed, isWon, canFire, canReach, purgeCleared, isExposed, freeSlot, FLIGHT, tickGame, advance, forecast, forecastKey, fates, busy, revealLone, checkOf, pace, Attempt, FAST,
-  setView, seen, pitchUnits, pitchRad, YAW_STEPS, START_YAW, START_PITCH, PITCH_STEPS, TURN, SEEK, LOOK, STALL } from '../js/logic.js';
+  setView, seen, camPos, pitchUnits, pitchRad, YAW_STEPS, START_YAW, START_PITCH, PITCH_STEPS, TURN, SEEK, STALL } from '../js/logic.js';
+import { pixels } from '../tools/sight.mjs';
 import { LEVELS, buildLevel, dealLevel, levelPrint, rng } from '../js/levels.js';
 import { plan, greedy, greedyCheck, hastyCheck, hastyGreedy, lineHolds, playLine, onClock, earlyParks, forecastFirst, backtrack, forecastCheck, hastyForecastCheck, backtrackCheck, firingTime, curveMisses, GAPS, LAND, GREEDY_PLAYS, PARK_MIN } from '../tools/players.mjs';
 
@@ -236,25 +237,70 @@ test('the camera can look from below and from almost straight above; from below 
   assert.equal(seen(st, 0), true, 'from almost straight above, its top');
 });
 
-test('crew who wait with nothing in view make the camera look higher, then lower; held still they hit a hidden cube in the end', () => {
-  // Turning on its own: the camera rises after SEEK ticks of waiting and finds the pit's floor.
+test('crew who wait with nothing in view make the camera swing to it; held still they never hit a hidden cube', () => {
+  // Turning on its own: after SEEK ticks of waiting the camera swings up to see the pit's floor.
   const a = makeBoard(pit());
   a.slots = [crew(0, 1, 1)];
   let shotAt = -1;
   while (shotAt < 0 && a.tick < 2 * STALL) if (step(a).shots.length) shotAt = a.tick;
-  assert.ok(shotAt > SEEK && shotAt < SEEK + LOOK, `the camera looked higher and green fired at tick ${shotAt}`);
+  assert.ok(shotAt > SEEK && shotAt <= SEEK + 1, `the camera swung higher and green fired at tick ${shotAt}`);
   assert.ok(a.pitch > START_PITCH);
   settle(a);
   for (let k = 0; k < 200; k++) step(a); // the camera glides back a few steps at a time
   assert.equal(a.pitch, a.home, 'once something flies the camera goes back to where it was');
-  // Held still by the player, nothing moves the camera: after STALL ticks green takes the hidden cube.
+  // Held still by the player, nothing moves the camera, and green waits however long it takes.
   const b = makeBoard(pit());
   setView(b, START_YAW, START_PITCH, 0);
   b.slots = [crew(0, 1, 1)];
   shotAt = -1;
-  while (shotAt < 0 && b.tick < 2 * STALL) if (step(b).shots.length) shotAt = b.tick;
+  while (shotAt < 0 && b.tick < 4 * STALL) if (step(b).shots.length) shotAt = b.tick;
   assert.equal(b.pitch, START_PITCH);
-  assert.ok(shotAt > STALL && shotAt < STALL + 5, `held still, green fired at the hidden cube at tick ${shotAt}`);
+  assert.equal(shotAt, -1, 'held still, green never fires at the hidden cube');
+  // The player tilts the camera up: the pit's floor comes into view and green fires.
+  setView(b, START_YAW, PITCH_STEPS - 1, 0);
+  assert.equal(step(b).shots.length, 1, 'tilted up, green fires at once');
+});
+
+test('the camera that swings for crew who wait looks from below the turntable too, under a part that sticks out', () => {
+  // A red post with a red arm sticking out at the top; one green cube hangs under the arm's end,
+  // with red on its four sides, so only its underside is open to the air: only from below is it seen.
+  const cubes = [[1, 0, 1, 1], [1, 1, 1, 1], [1, 2, 1, 1], [1, 3, 1, 1], [2, 3, 1, 1], [3, 3, 1, 1], [3, 2, 1, 2],
+    [2, 2, 1, 1], [4, 2, 1, 1], [3, 2, 0, 1], [3, 2, 2, 1]];
+  const m = grid(5, 4, 3, cubes);
+  const st = makeBoard(m);
+  const green = at(m, 3, 2, 1);
+  assert.equal(isExposed(st, green), true, 'its underside touches the air');
+  st.slots = [crew(0, 1, 1)];
+  let shotAt = -1;
+  while (shotAt < 0 && st.tick < 2 * STALL) if (step(st).shots.length) shotAt = st.tick;
+  assert.ok(shotAt > SEEK && shotAt <= SEEK + 1, `green fired once the camera swung below (tick ${shotAt})`);
+  assert.ok(st.pitch < START_PITCH, 'the camera was looking from low down');
+});
+
+test('every shot takes a cube that shows on the phone screen at the moment it leaves', () => {
+  // Plays Robot, Lighthouse and Castle, sending a line whose front crew member can shoot now, else
+  // any line once nothing moves, and draws the screen the rules look from (a phone held upright, at
+  // twice its size) at every shot: the cube shot at shows in it, never one hidden behind another part.
+  let shots = 0;
+  for (const n of [4, 8, 17]) {
+    const st = buildLevel(n).board, rand = rng(41 + n);
+    for (let guard = 0; guard < 30000 && shots < 120 * (1 + [4, 8, 17].indexOf(n)) && !isWon(st) && !isJammed(st); guard++) {
+      if (freeSlot(st) >= 0) {
+        const cols = st.columns.map((_, i) => i).filter(i => st.columns[i].length);
+        const ready = cols.filter(i => target(st, st.columns[i][0].color) >= 0);
+        if (ready.length) deploy(st, ready[0]);
+        else if (cols.length && !busy(st)) deploy(st, cols[Math.floor(rand() * cols.length)]);
+      }
+      const r = tickGame(st);
+      for (const s of r.shots) {
+        shots++;
+        const ty = -0.6 + (st.topY + 0.6) * 0.46;
+        const shown = pixels(st, camPos(st), [st.sx / 2, ty, st.sz / 2], 14, 0.66, 780, 1180).get(s.cell) || 0;
+        assert.ok(shown > 0, `${LEVELS[n].name}: a shot at tick ${st.tick} took cube ${s.cell}, which does not show on the screen`);
+      }
+    }
+  }
+  assert.ok(shots >= 200, `only ${shots} shots were checked`);
 });
 
 test('the view the player turns to is kept with the attempt: undo, save and restore give the same board', () => {

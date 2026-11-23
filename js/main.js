@@ -1058,7 +1058,7 @@ function showView(dt) {
   } else if (look.hand !== 'drag') {
     if (state === 'play' && st) {
       // Where the rules' turntable is between two ticks; any gap to it closes in about 0.2 s.
-      const wantY = R.yawRad(st.yaw + st.spin * (clock / FIRE_GAP)), wantP = R.pitchRad(st.pitch);
+      const wantY = R.yawRad(st.yaw + (st.hold > 0 ? 0 : st.spin) * (clock / FIRE_GAP)), wantP = R.pitchRad(st.pitch);
       const k = Math.exp(-dt * 12);
       look.yaw = wantY + wrapPi(look.yaw - wantY) * k;
       look.pitch = wantP + (look.pitch - wantP) * k;
