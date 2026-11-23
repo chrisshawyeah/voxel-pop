@@ -17,7 +17,7 @@
 //     when a deal can be found that is), the backtracking player needs at most `undos` undos in
 //     its median won play, and both fit the curve beside the levels next to it as they are stored
 //     now (tools/players.mjs curveMisses: at most 20 points easier than the level before, the
-//     median undos at most 3 over the level before's and at most 1 under);
+//     median undos at most 4 over the level before's and at most 1 under);
 //   - on a level with `opening: 'park'`, most greedy plays (PARK_MIN %) park a crew member in
 //     their first three sends.
 // When no deal passes everything it keeps the one that misses least and says what it misses.

@@ -239,10 +239,11 @@ export function backtrack(board, rand, cap = 50, land = LAND) {
 // the median undos may rise by at most UNDO_RISE over the level before's and fall by at most
 // UNDO_FALL, so they climb in small steps (a breather is left out: the level after it is compared
 // with the level before it). The median jumps from 0 to a level's full depth once the follower
-// wins less than half the time, so the first hard level may rise by 3. curveMisses() lists what a set of measures
+// wins less than half the time, so the first hard level may rise by 4 (House after Tree; decided on
+// Work item 8.1nov, November 22nd). curveMisses() lists what a set of measures
 // breaks; the tests, tools/difficulty.mjs and tools/pick-deals.mjs all use it.
 export const STEP_MAX = 20;
-export const UNDO_RISE = 3;
+export const UNDO_RISE = 4;
 export const UNDO_FALL = 1;
 export const isBreather = (defs, n) => n > 0 && defs[n].follow[0] > defs[n - 1].follow[1];
 // m[n] = { fc, undos } for level n (undos null when it never won; a level with no m[n] is not
