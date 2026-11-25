@@ -99,10 +99,12 @@ Play: https://chrisshawyeah.github.io/voxel-pop/
   left with a check of the board then. It is saved after every send and undo, when the page is
   hidden or closed, and when you move to another level, so a page the phone stopped in the
   background comes back exactly as it was, undo and all. A save from an older version of the level
-  (its sculpture, its crew, its pads or the rules changed, not just its name or test bands:
-  `levelPrint()` in `js/levels.js`, `RULES` in `js/logic.js`) is turned down with "Level changed.
-  Restarted.", and a broken one can never stop the game: every field and tick is checked and
-  bounded (`Attempt.restore()` in `js/logic.js`). The single attempt very old versions kept
+  (its sculpture, its crew, its pads or the rules changed, not just its name, test bands or the
+  shades of its colours: `levelPrint()` in `js/levels.js`, `RULES` in `js/logic.js`) is turned
+  down with "Level changed. Restarted.", and a broken one can never stop the game: every field and
+  tick is checked and bounded (`Attempt.restore()` in `js/logic.js`). This version works the
+  fingerprint out differently, so a level left half-played in an earlier version starts again
+  once, with the same message. The single attempt very old versions kept
   carries no fingerprint, so its level starts again with the same message.
 - Unless the game was just reopened (next point), a new version loads only at a level boundary: a
   level with nothing sent or undone, the start of another level, or the ending, and only once every
@@ -115,8 +117,10 @@ Play: https://chrisshawyeah.github.io/voxel-pop/
 - Reopened, it loads at once, even in the middle of a level: when the page has just loaded, or
   comes back after a minute or more away (hidden that long, or its frames stopped that long while
   iOS held the app), the new version loads before the first touch. The level is saved as it is
-  first and comes back as it was left, or starts again when the new version changed it (when
-  storage cannot keep it, the new version waits for a level boundary). A touch
+  first and comes back as it was left, or starts again when the new version changed it. While a
+  level left half-played this visit lives only in memory (storage blocked or full), no reload
+  happens, at a level boundary or otherwise, until that level is won or restarted (`reloadAt()`
+  in `js/main.js`). A touch
   before the new version is ready means it waits for a level boundary as above
   (`reopened()` and `loadNewBuildWhenFree()` in `js/main.js`; `tools/reopen-check.mjs` proves it
   in a browser).

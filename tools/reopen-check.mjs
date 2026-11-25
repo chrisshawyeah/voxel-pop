@@ -1,6 +1,7 @@
 // Reopened after a minute or more away, before the first touch, the game loads the new
 // version, even in the middle of a level, and the level comes back as it was left (11nov).
 // Run: serve the repo (python3 -m http.server 8137), then node tools/reopen-check.mjs http://127.0.0.1:8137/
+// Playwright comes from the repo's own node_modules (npm i --no-save playwright), else from ~/code.
 // Serves the branch at BASE; the page's build mark is rewritten per request: the document the
 // browser loads says `doc`, the live page the game checks says `live`. "Away" is made by holding the
 // page's frames (requestAnimationFrame) and moving its clock (Date.now) on; "hidden" and "visible"
@@ -21,9 +22,16 @@
 //        N. storage full at the reopen: no reload, the level plays on as left.
 //        O. storage blocked: the arrows (a level boundary) do not reload while a level left half-played lives only in memory.
 //        P. stars, clean clears and cleared marks won on a level that has changed since go; the rest stay.
+//        Q. a level won for real keeps its marks after a reload (the next one deals no level to check them), and in
+//           a new version with only the rules' version up.
+//        R. the ending, with the new version found before: offline on coming back, no reload; online the next time, it loads.
+//        S. another version went live after the new one was found: on coming back the newest one loads.
+//        T. a mouse hovering a front before the check came back counts as a touch: keeps the old version.
+//        U. offline as it comes back, online again before a touch: the check is tried again and loads it.
 import { createRequire } from 'node:module';
-const require = createRequire(process.env.HOME + '/code/package.json');
-const { chromium } = require('playwright');
+const playwright = from => createRequire(from)('playwright');
+let chromium;
+try { ({ chromium } = playwright(new URL('../package.json', import.meta.url))); } catch { ({ chromium } = playwright(process.env.HOME + '/code/package.json')); }
 const BASE = process.argv[2] || 'http://127.0.0.1:8137/';
 const browser = await chromium.launch();
 let bad = 0;
@@ -50,6 +58,7 @@ async function open(opts = {}) {
     const r = await route.fetch();
     let js = await r.text();
     if (s.changeLevel2) js += "\nLEVELS[1].name += ', changed'; LEVELS[1].pads += 1;\n"; // the new version changed level 2 (its play, not only its name)
+    if (s.countDeals) js = js.replace('export function dealLevel(def) {', '$& globalThis.__dealt = (globalThis.__dealt || 0) + 1;'); // how many levels this page dealt
     await route.fulfill({ response: r, body: js, headers: { ...r.headers(), 'cache-control': 'no-store' } });
   });
   return { ctx, page, s };
@@ -94,6 +103,54 @@ async function reloadedTo(page, s, docsBefore, ms = 8000) {
     await page.waitForTimeout(100);
   }
   return false;
+}
+
+// Plays the level open now to its win by the careful rule (verify/journeys.ts): the first line whose
+// front can hit a cube; with none and nothing moving, the first line.
+async function winLevel(page) {
+  const n = await page.evaluate(() => window.crumble.level);
+  const end = Date.now() + 150000;
+  while (Date.now() < end) {
+    const g = await page.evaluate(() => ({ state: window.crumble.state, level: window.crumble.level }));
+    if (g.state === 'won' || g.state === 'done' || g.level !== n) return;
+    if (g.state !== 'play') throw new Error(`level ${n + 1} is ${g.state}, not won`);
+    const i = await page.evaluate(() => {
+      const st = window.crumble.board;
+      if (st.slots.every(x => x)) return -1;
+      const lines = st.columns.map((c, i) => (c.length ? i : -1)).filter(i => i >= 0);
+      const pick = lines.find(i => st.exposed[st.columns[i][0].color].size > 0);
+      if (pick !== undefined) return pick;
+      const still = !st.flying.length && st.slots.every(x => !x || st.exposed[x.color].size === 0);
+      return still && lines.length ? lines[0] : -1;
+    });
+    if (i >= 0) await page.locator('#queues .col').nth(i).locator('button.front').click({ timeout: 20000 });
+    await page.waitForTimeout(i >= 0 ? 150 : 250);
+  }
+  throw new Error(`level ${n + 1} was not won in 150 s`);
+}
+// Every level's shape as the page's own levels.js works it out (`skip`: those left null).
+const shapesNow = (page, skip = -1) => page.evaluate(async skip => {
+  const { levelShape } = await import(new URL('js/levels.js', location.href).href);
+  return Array.from({ length: 20 }, (_, n) => (n === skip ? null : levelShape(n)));
+}, skip);
+
+// A reload while the check after coming back runs to its end: until it has found the new version
+// (every file fetched again), then the live page's next answer (s.delay) and 3 s more. A broken touch
+// guard would reload within that. null when the check never found the new version.
+async function reloadedByCheck(page, s, docsBefore) {
+  const found = await page.waitForFunction(() => window.crumble.newBuild, null, { timeout: 30000, polling: 100 }).then(() => true, () => s.docs > docsBefore);
+  return found ? reloadedTo(page, s, docsBefore, s.delay + 3000) : null;
+}
+const keptSay = re => (re ? 'reloaded' : re === null ? 'the check never found the new version' : 'kept');
+
+// A level just begun: one crew member sent, still on its way; then the live page has the new version.
+async function begun() {
+  const o = await open();
+  await o.page.goto(BASE + '?level=2');
+  await loaded(o.page); await o.page.waitForTimeout(1800); // the load's own check finds nothing new
+  await o.page.locator('#queues .col button.front').first().click({ timeout: 20000 });
+  o.s.live = 'bbb2222'; o.s.doc = 'bbb2222';
+  return o;
 }
 
 async function half(level = 2, { keys = false, init = null } = {}) {
@@ -148,8 +205,8 @@ async function half(level = 2, { keys = false, init = null } = {}) {
   await vis(page, 'hidden'); await holdFrames(page); await shiftClock(page, 61000); await vis(page, 'visible'); await freeFrames(page);
   await page.waitForTimeout(300);
   await turn(page); // a touch while the check is out
-  const re = await reloadedTo(page, s, d, 6000);
-  ok(!re && (await build(page)) === 'aaa1111', `D. touched before the check came back: kept the old version (${re ? 'reloaded' : 'kept'})`);
+  const re = await reloadedByCheck(page, s, d);
+  ok(re === false && (await build(page)) === 'aaa1111', `D. touched before the check came back: kept the old version (${keptSay(re)})`);
   const now = await snap(page);
   ok(now.sends === was.sends && now.state === 'play', `D. still mid-level, ${now.sends} sends`);
   const d3 = s.docs;
@@ -177,6 +234,7 @@ async function half(level = 2, { keys = false, init = null } = {}) {
     await page.waitForTimeout(k ? 400 : 150);
   }
   await holdFrames(page);
+  await page.evaluate(() => new Promise(r => window.__raf(() => window.__raf(r)))); // the frame the game asked for before the hold runs first
   const was = await page.evaluate(() => window.crumble.snapshot());
   const moving = (was.flying && was.flying.length) || /\+\d/.test(String(was.pads));
   s.live = 'bbb2222'; s.doc = 'bbb2222';
@@ -278,8 +336,8 @@ async function half(level = 2, { keys = false, init = null } = {}) {
     if (shown) await vis(page, 'visible'); // the check goes out
     await turn(page); // a touch before the first frame since coming back
     await freeFrames(page);
-    const re = await reloadedTo(page, s, d, 6000);
-    ok(!re && (await build(page)) === 'aaa1111', `K. ${shown ? 'hidden then visible' : 'frames held, no visibility event'}, touched before the first frame: kept the old version (${re ? 'reloaded' : 'kept'})`);
+    const re = await reloadedByCheck(page, s, d);
+    ok(re === false && (await build(page)) === 'aaa1111', `K. ${shown ? 'hidden then visible' : 'frames held, no visibility event'}, touched before the first frame: kept the old version (${keptSay(re)})`);
     await ctx.close();
   }
 }
@@ -338,7 +396,7 @@ async function half(level = 2, { keys = false, init = null } = {}) {
   await loaded(page);
   const keys = () => page.evaluate(() => ['stars', 'cleared-levels', 'clean-levels', 'all-cleared', 'level'].map(k => localStorage.getItem('crumble-crew.' + k)).join(' '));
   const all = String(2 ** 20 - 1);
-  const print2 = await page.evaluate(async () => (await import(new URL('js/levels.js', location.href).href)).levelPrint(1));
+  const print2 = await page.evaluate(async () => (await import(new URL('js/levels.js', location.href).href)).levelShape(1));
   await page.evaluate(([all, print2]) => { // level 2 won on the level as it is now, every other one on another
     const set = (k, v) => localStorage.setItem('crumble-crew.' + k, v);
     set('stars', '3'.repeat(20)); set('cleared-levels', all); set('clean-levels', all); set('all-cleared', '2');
@@ -354,6 +412,100 @@ async function half(level = 2, { keys = false, init = null } = {}) {
   await page.reload(); await loaded(page);
   const two = await keys(), stars2 = await page.evaluate(() => window.crumble.stars);
   ok(two === `${'0'.repeat(20)} 0 0 2 1` && stars2 === 0, `P. marks from before the fingerprints all go, all-cleared and the level stay (${two}; level 2 shows ${stars2} stars)`);
+  await ctx.close();
+}
+{ // Q
+  const { ctx, page, s } = await open();
+  s.countDeals = true;
+  await page.goto(BASE + '?level=1');
+  await loaded(page);
+  await winLevel(page);
+  const marks = () => page.evaluate(() => ['stars', 'cleared-levels', 'clean-levels'].map(k => localStorage.getItem('crumble-crew.' + k)).join(' '));
+  const won = await marks();
+  await page.reload(); await loaded(page);
+  const one = await marks();
+  ok(/^[123]0{19} 1 (1|null)$/.test(won) && one === won, `Q. level 1 won for real: its marks stay after a reload (${won} -> ${one})`);
+  await page.reload(); await loaded(page);
+  const dealt = await page.evaluate(() => globalThis.__dealt);
+  ok(dealt === 1, `Q. the load after that, in the same version, deals only the level it opens, none to check the marks (${dealt} dealt)`);
+  const rules = () => page.evaluate(async () => (await import(new URL('js/logic.js', location.href).href)).RULES);
+  const rules0 = await rules();
+  await page.route(u => u.pathname.endsWith('/js/logic.js'), async route => { // a new version whose only change is the rules' version
+    const r = await route.fetch();
+    const js = (await r.text()).replace(/export const RULES = (\d+);/, (_, v) => `export const RULES = ${Number(v) + 1};`);
+    await route.fulfill({ response: r, body: js, headers: { ...r.headers(), 'cache-control': 'no-store' } });
+  });
+  s.doc = s.live = 'bbb2222';
+  await page.reload(); await loaded(page);
+  const two = await marks(), rules1 = await rules();
+  ok(two === won && rules1 === rules0 + 1, `Q. and in a new version with the rules' version up from ${rules0} to ${rules1} (${await build(page)}): ${two}`);
+  await ctx.close();
+}
+{ // R
+  const { ctx, page, s } = await open();
+  await page.goto(BASE + '?level=1');
+  await loaded(page);
+  const rest = await shapesNow(page, 0);
+  await page.evaluate(rest => { // every level but level 1 won since the last full clear, on the levels as they are
+    localStorage.setItem('crumble-crew.cleared-levels', 2 ** 20 - 2); localStorage.setItem('crumble-crew.progress-prints', JSON.stringify(rest));
+  }, rest);
+  await page.reload(); await loaded(page); await page.waitForTimeout(1800);
+  await page.locator('#queues .col button.front').first().click({ timeout: 20000 }); // a send, so the level is mid-way
+  s.live = s.doc = 'bbb2222';
+  let d = s.docs;
+  await vis(page, 'hidden'); await shiftClock(page, 5000); await vis(page, 'visible'); // a short look away finds the new version
+  await page.waitForFunction(() => window.crumble.newBuild, null, { timeout: 30000, polling: 100 });
+  await winLevel(page);
+  const end = await page.evaluate(() => window.crumble.state + ' | ' + document.getElementById('ending-title').textContent);
+  ok(s.docs === d && /^done \| All 20 cleared/.test(end), `R. found mid-level and kept; then the last level missing won: the ending (${s.docs === d ? end : 'reloaded'})`);
+  s.offline = true;
+  d = s.docs;
+  await vis(page, 'hidden'); await holdFrames(page); await shiftClock(page, 61000); await vis(page, 'visible');
+  await page.waitForTimeout(4000);
+  const still = await page.evaluate(() => window.crumble.state).catch(() => 'gone');
+  ok(s.docs === d && still === 'done', `R. offline on coming back to the ending: no reload, the ending stays (${s.docs === d ? `none tried, ${still}` : 'a reload was tried'})`);
+  s.offline = false;
+  await vis(page, 'hidden'); await shiftClock(page, 61000); await vis(page, 'visible'); // online, the next time back
+  const re = await reloadedTo(page, s, d);
+  ok(re && (await build(page)) === 'bbb2222' && (await page.evaluate(() => window.crumble.level)) === 0, `R. online the next time back: the new version loads, at level 1 (${re ? await build(page) : 'no reload'})`);
+  await ctx.close();
+}
+{ // S
+  const { ctx, page, s } = await begun();
+  let d = s.docs;
+  await vis(page, 'hidden'); await shiftClock(page, 5000); await vis(page, 'visible'); // a short look away finds bbb2222
+  await page.waitForFunction(() => window.crumble.newBuild, null, { timeout: 30000, polling: 100 });
+  ok(s.docs === d, 'S. found while playing, kept the old version');
+  s.live = s.doc = 'ccc3333'; // then another version goes live
+  d = s.docs;
+  await vis(page, 'hidden'); await holdFrames(page); await shiftClock(page, 61000); await vis(page, 'visible');
+  const re = await reloadedTo(page, s, d, 12000);
+  const now = re && await snap(page);
+  ok(re && (await build(page)) === 'ccc3333' && now.level === 1 && now.sends === 1, `S. another version went live since: the newest one loaded, level as left (${re ? `${await build(page)}, level ${now.level + 1}, ${now.sends} sends` : 'no reload'})`);
+  await ctx.close();
+}
+{ // T
+  const { ctx, page, s } = await begun();
+  const d = s.docs;
+  s.delay = 2500;
+  await vis(page, 'hidden'); await holdFrames(page); await shiftClock(page, 61000); await vis(page, 'visible'); await freeFrames(page);
+  await page.waitForTimeout(300);
+  const box = await page.locator('#queues .col button.front').first().boundingBox();
+  await page.mouse.move(box.x + 6, box.y + 6, { steps: 4 }); // over a front, no press: its forecast opens
+  const re = await reloadedByCheck(page, s, d);
+  ok(re === false && (await build(page)) === 'aaa1111', `T. a mouse hovering a front before the check came back: kept the old version (${keptSay(re)})`);
+  await ctx.close();
+}
+{ // U
+  const { ctx, page, s } = await begun();
+  s.offline = true;
+  const d = s.docs;
+  await vis(page, 'hidden'); await holdFrames(page); await shiftClock(page, 61000); await vis(page, 'visible');
+  await page.waitForTimeout(2000);
+  s.offline = false; // online again a moment later, before any touch
+  const re = await reloadedTo(page, s, d, 15000);
+  const now = re && await snap(page);
+  ok(re && (await build(page)) === 'bbb2222' && now.level === 1 && now.sends === 1, `U. offline as it came back, online again before a touch: tried again, loaded the new version, level as left (${re ? `level ${now.level + 1}, ${now.sends} sends` : 'no reload'})`);
   await ctx.close();
 }
 await browser.close();

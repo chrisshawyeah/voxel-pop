@@ -217,26 +217,34 @@ export function dealLevel(def) {
   return { def, model, board, shooters: crew.length, hidden };
 }
 
-// A short fingerprint of a level as dealt: what decides play, that is its sculpture (size, cubes
-// and colours), its crew in their lines, its pads and the rules' version. A saved attempt carries it
-// (js/main.js), so a save made before any of those changed is turned down instead of replayed onto a
-// different puzzle; a new name or test band leaves it as it was.
+// Two short fingerprints of a level as dealt. levelShape is its puzzle: its sculpture (size and
+// cubes, cell by cell), its crew in their lines and its pads. A player's stars and marks are kept
+// against it (js/main.js), so new rules or a new shade of a colour keep them, and a new sculpture
+// or new crew under the level's number do not. levelPrint adds the rules' version: a saved attempt
+// carries it (js/main.js), so a save made before any of those changed is turned down instead of
+// replayed onto a different puzzle. A new name, test band or shade of a colour (which only decides
+// drawing) leaves both as they were.
 const prints = new Map();
-export function levelPrint(n) {
+const hash = text => {
+  let a = 0x811c9dc5, b = 0x9e3779b9;
+  for (let i = 0; i < text.length; i++) {
+    const c = text.charCodeAt(i);
+    a = Math.imul(a ^ c, 16777619);
+    b = Math.imul(b ^ c, 2246822519) ^ (b >>> 13);
+  }
+  return `${(a >>> 0).toString(36)}.${(b >>> 0).toString(36)}.${text.length}`;
+};
+function fingerprints(n) {
   const L = buildLevel(n);
   if (!prints.has(L.def)) {
-    const text = JSON.stringify([RULES, FLIGHT, [L.model.sx, L.model.sy, L.model.sz], Array.from(L.model.cells).join(''), L.model.palette,
-      L.board.columns.map(col => col.map(s => [s.color, s.count, s.hidden ? 1 : 0])), L.board.slots.length]);
-    let a = 0x811c9dc5, b = 0x9e3779b9;
-    for (let i = 0; i < text.length; i++) {
-      const c = text.charCodeAt(i);
-      a = Math.imul(a ^ c, 16777619);
-      b = Math.imul(b ^ c, 2246822519) ^ (b >>> 13);
-    }
-    prints.set(L.def, `${(a >>> 0).toString(36)}.${(b >>> 0).toString(36)}.${text.length}`);
+    const shape = [[L.model.sx, L.model.sy, L.model.sz], Array.from(L.model.cells).join(''),
+      L.board.columns.map(col => col.map(s => [s.color, s.count, s.hidden ? 1 : 0])), L.board.slots.length];
+    prints.set(L.def, { shape: hash(JSON.stringify(shape)), play: hash(JSON.stringify([RULES, FLIGHT, ...shape])) });
   }
   return prints.get(L.def);
 }
+export const levelShape = n => fingerprints(n).shape;
+export const levelPrint = n => fingerprints(n).play;
 
 // The level as played. Built once per level line and kept, so a restart, the arrows and the
 // tap after running out of room hand out a fresh copy instead of dealing it again.

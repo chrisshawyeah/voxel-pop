@@ -8,7 +8,7 @@
 import { Stage } from './render.js';
 import { Fx } from './fx.js';
 import { Sound, Buzz } from './audio.js';
-import { LEVELS, buildLevel, levelPrint } from './levels.js';
+import { LEVELS, buildLevel, levelPrint, levelShape } from './levels.js';
 import * as R from './logic.js';
 
 const $ = id => document.getElementById(id);
@@ -18,7 +18,8 @@ const DONE_KEY = 'crumble-crew.all-cleared';       // how many times every level
 const CLEARED_KEY = 'crumble-crew.cleared-levels'; // which levels have been won since then, one bit each
 const CLEAN_KEY = 'crumble-crew.clean-levels';     // which levels have been won with no undo, one bit each
 const STARS_KEY = 'crumble-crew.stars';            // the most stars each level has been won with, one digit a level
-const PRINTS_KEY = 'crumble-crew.progress-prints'; // each level's fingerprint (levelPrint) as its stars and bits above were won
+const PRINTS_KEY = 'crumble-crew.progress-prints'; // each level's shape (levelShape) as its stars and bits above were won
+const SHAPES_KEY = 'crumble-crew.shapes';          // this version's shape of each level with marks, worked out once a version
 const ATTEMPT_KEY = n => `crumble-crew.attempt.${n + 1}`; // level n half-played, by its number on screen
 const OLD_ATTEMPT_KEY = 'crumble-crew.attempt';    // the one attempt the game kept before, for any level
 const TAUGHT_KEY = 'crumble-crew.taught';          // the lessons seen, one bit each (SENT, PARK, TICK below)
@@ -33,6 +34,7 @@ const RETRY_MS = 60000;   // a reload that came back as the old version is tried
 const AWAY_MS = 60000;    // back after this long away, the game counts as reopened (a new version loads before the first touch)
 const CHECK_MS = 30000;   // a check for a new version out longer than this (on the clock, so one frozen with the page counts) no longer holds up the next
 const LIVE_MS = 5000;     // how long the live page has to answer
+const RECHECK_MS = 10000; // a check that did not answer before the first touch since coming back is tried again after this long
 const LAST = LEVELS.length - 1;
 const TEACH_UNTIL = 2;    // levels 1 to 3 teach the first send and always show the forecast under each front
 const BUILD = document.querySelector('meta[name="build"]')?.content || 'dev';
@@ -86,20 +88,25 @@ let cleanMask = Number(store.get(CLEAN_KEY)) || 0;
 const starsFor = undos => (undos === 0 ? 3 : undos <= 2 ? 2 : 1);
 const bestStars = String(store.get(STARS_KEY) || '').padEnd(LEVELS.length, '0').slice(0, LEVELS.length).split('').map(d => Math.min(3, Number(d) || 0));
 LEVELS.forEach((_, n) => { if (cleanMask & bit(n)) bestStars[n] = 3; });
-// Stars and bits won on a level that has changed since (another sculpture under its number) are
-// not the new level's: they go, and all-cleared and the level being played stay. Those kept from
-// before the fingerprints were kept come from levels that have all changed since (9 to 20 on
-// 23nov, 1 to 8 on 25nov), so they all go.
+// Stars and bits won on a level whose shape has changed since (another sculpture, crew or pads under
+// its number: levelShape in js/levels.js; new rules or a new shade of a colour are not one) are not
+// the new level's: they go, and all-cleared and the level being played stay. Those kept from before
+// the shapes were kept all go: levels 1 to 8 are new on 25nov, and on levels 9 to 20, new on 23nov,
+// the game cannot tell a mark won on the levels before them from one won since, so it clears them all.
+// Working out a shape deals the level, so each one is worked out once a version and kept.
 const wonOn = (() => { try { const p = JSON.parse(store.get(PRINTS_KEY)); return Array.isArray(p) ? p : []; } catch { return []; } })();
+const shapes = (() => { try { const s = JSON.parse(store.get(SHAPES_KEY)); return BUILD !== 'dev' && s.build === BUILD && Array.isArray(s.shapes) ? s.shapes : []; } catch { return []; } })();
+const shapeOf = n => shapes[n] || (shapes[n] = levelShape(n));
 if (LEVELS.map((_, n) => {
   if (!bestStars[n] && !((clearedMask | cleanMask) & bit(n))) return false; // nothing won there
-  if (wonOn[n] && wonOn[n] === levelPrint(n)) return false;
+  if (wonOn[n] && wonOn[n] === shapeOf(n)) return false;
   bestStars[n] = 0; clearedMask &= ~bit(n); cleanMask &= ~bit(n); wonOn[n] = null;
   return true;
 }).some(Boolean)) {
   store.set(STARS_KEY, bestStars.join('')); store.set(CLEARED_KEY, clearedMask); store.set(CLEAN_KEY, cleanMask);
   store.set(PRINTS_KEY, JSON.stringify(wonOn));
 }
+store.set(SHAPES_KEY, JSON.stringify({ build: BUILD, shapes }));
 const STAR_SVG = '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="m12 2.8 2.7 5.6 6.1.8-4.5 4.2 1.1 6.1L12 16.6l-5.4 2.9 1.1-6.1-4.5-4.2 6.1-.8z"/></svg>';
 const starRow = n => [1, 2, 3].map(k => STAR_SVG.replace('<svg', `<svg class="${k <= n ? 'on' : 'off'}"`)).join('');
 let allCleared = Number(store.get(DONE_KEY)) || 0;
@@ -839,7 +846,7 @@ function win() {
   $('undo').disabled = true;
   closePreview(); inspect(-1); teach();
   forgetAttempt(current);
-  wonOn[current] = levelPrint(current); store.set(PRINTS_KEY, JSON.stringify(wonOn)); // what the marks below were won on
+  wonOn[current] = shapeOf(current); store.set(PRINTS_KEY, JSON.stringify(wonOn)); // what the marks below were won on
   clearedMask |= bit(current);
   store.set(CLEARED_KEY, clearedMask);
   if (clean) { cleanMask |= bit(current); store.set(CLEAN_KEY, cleanMask); }
@@ -928,6 +935,7 @@ window.addEventListener('keydown', e => { touchedAt = Date.now(); if (e.key === 
 // press) must not swallow the next tap, wherever it lands. While a finger is down (holding a front,
 // turning the sculpture) the ticks run at 1x, even with every pad taken (R.pace).
 window.addEventListener('pointerdown', e => { held = false; pressed.add(e.pointerId); touchedAt = Date.now(); }, true);
+window.addEventListener('pointermove', () => { touchedAt = Date.now(); }, true); // a mouse moving over the page counts too (hovering a front reads its forecast)
 const lifted = e => { pressed.delete(e.pointerId); };
 window.addEventListener('pointerup', lifted, true);
 window.addEventListener('pointercancel', lifted, true);
@@ -1010,27 +1018,43 @@ async function checkForUpdate() {
     const was = lastReload();
     if (was.build === live && Math.abs(Date.now() - was.at) < RETRY_MS) return;
     const got = await Promise.all(FRESH.map(f => fetch(f, { cache: 'reload' }).then(r => r.ok && r.arrayBuffer().then(() => true), () => false)));
-    if (!got.every(Boolean)) return; // a file did not come: no mix of old and new, try again later
+    if (!got.every(Boolean)) return failed(); // a file did not come: no mix of old and new, try again later
     if (checking !== started) return; // a newer check is out (this one was held past CHECK_MS): it decides
     newBuild = live;
     loadNewBuildWhenFree();
-  } catch { /* offline: next time */ } finally { if (checking === started) checking = 0; }
+  } catch { failed(); /* offline: soon again while untouched, else next time */ } finally { if (checking === started) checking = 0; }
 }
 // `at`: a touch after it came after the page came back.
 function reopened(at = Date.now()) {
-  reopenedAt = at;
-  if (newBuild) loadNewBuildWhenFree(); else checkForUpdate();
+  reopenedAt = at; rechecks = 0;
+  recheck();
+}
+const recheck = () => (newBuild ? loadNewBuildWhenFree() : checkForUpdate());
+// A check that did not answer (offline, too slow) before the first touch since the page came back
+// is tried again RECHECK_MS later, up to 3 times, while the page shows: a phone just back is often
+// still reconnecting.
+let rechecks = 0, recheckTimer = 0;
+function failed() {
+  if (recheckTimer || rechecks >= 3 || reopenedAt <= touchedAt) return;
+  rechecks++;
+  recheckTimer = setTimeout(() => { recheckTimer = 0; if (reopenedAt > touchedAt && document.visibilityState === 'visible') recheck(); }, RECHECK_MS);
 }
 // The new version loads now when nothing is lost by it: at the ending, on a level with nothing sent
-// or undone, or reopened and not touched since, with the level saved as it is now. That last one
-// first asks the live page again (a phone just back is often offline, and a reload that fails leaves
-// the level on an error page) and goes only if it still answers with the new version, untouched.
+// or undone, or reopened and not touched since, with the level saved as it is now. First it asks the
+// live page again (a phone just back is often offline, and a reload that fails leaves the game on an
+// error page) and goes only if it still answers with the new version and nothing is lost by it yet.
+// When the live page has moved on to another version, that one is checked for instead (its files
+// fetched first).
 const untouched = () => (state === 'play' || state === 'jam') && reopenedAt > touchedAt;
+const free = () => newBuild && (state === 'done' || (state === 'play' && !att.sends.length && !att.undos) || untouched());
 async function loadNewBuildWhenFree() {
-  if (!newBuild || state === 'gone') return;
+  if (!free()) return;
+  const live = await liveBuild().catch(failed); // undefined when it did not answer
+  if (live && live !== newBuild) { newBuild = ''; checkForUpdate(); return; }
+  if (live !== newBuild || !free()) return;
   if (state === 'done') reloadAt(0);
   else if (state === 'play' && !att.sends.length && !att.undos) reloadAt(current);
-  else if (untouched() && (await liveBuild().catch(() => '')) === newBuild && untouched()) { saveAttempt(); reloadAt(current); }
+  else { saveAttempt(); reloadAt(current); }
 }
 // The page is left for the new version: from here on nothing plays and nothing is saved, so a
 // restart that has just forgotten its attempt is not saved again as the page goes. Not while
@@ -1204,7 +1228,8 @@ if (store.get(SAVE_KEY) === String(current)) setTimeout(checkForUpdate, 1500);
 // For the automated checks: a small window onto the game. state is 'play', 'won', 'jam', 'done'
 // (the ending) or 'gone' (a new version is loading); allCleared is how many times every level was
 // cleared. sends is how many sends there are to take back, undos how many were taken back in this
-// attempt, clean whether this level has been cleared clean, speed 1 or R.FAST (R.pace).
+// attempt, clean whether this level has been cleared clean, speed 1 or R.FAST (R.pace), newBuild
+// the new version found with every file fetched ('' while none is).
 // snapshot() is the board in plain text, drawn what the screen draws (shots in the air, cubes
 // standing). start(n) starts level n from scratch (as the level's name does); send(line) and
 // undo() are the player's two moves.
@@ -1219,7 +1244,7 @@ function snapshot() {
 }
 window.crumble = {
   get state() { return state; }, get board() { return st; }, get level() { return current; },
-  get allCleared() { return allCleared; },
+  get allCleared() { return allCleared; }, get newBuild() { return newBuild; },
   get sends() { return att.sends.length; }, get undos() { return att.undos; },
   get clean() { return !!(cleanMask & bit(current)); }, get stars() { return bestStars[current]; }, get speed() { return speed; },
   get drawn() { return { shots: fx.shots.length, cubes: stage.shown }; },

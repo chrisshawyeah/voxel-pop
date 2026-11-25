@@ -66,6 +66,7 @@ export function findTraps(board, line, budget = BUDGET) {
   const out = [];
   for (let k = 0; k < line.length; k++) {
     const st = after(board, line, k);
+    if (!st) throw new Error(`send ${k} of the line cannot happen`);
     for (let j = 0; j < st.columns.length; j++) {
       if (j === line[k] || !tempting(st, j)) continue;
       if (loses(st, j, budget) === true) out.push([k, j]);
@@ -193,6 +194,8 @@ if (cmd === 'check') {
   if (!(best.moments >= 1 && best.moments <= 3)) { console.log(JSON.stringify({ done: false, moments: best.moments })); process.exit(1); }
   const st = best.st;
   const holds = lineHolds(st, best.line), fire = firingTime(st, best.line);
+  // Done only for a line the level tests take: it holds with the sends overlapping, and fires within 30 s.
+  if (!holds || !(fire <= 30)) { console.log(JSON.stringify({ done: false, moments: best.moments, holds, fire })); process.exit(1); }
   const fc = forecastCheck(st), back = backtrackCheck(st);
   console.log(JSON.stringify({ done: true, moments: best.moments, traps: best.traps, solution: best.line, lines: linesOf(st, names), pads: def.pads, crew: st.columns.flat().length, holds, fire,
     greedy: greedyCheck(st), hasty: hastyCheck(st), follow: fc.rate, undos: back.undos, backRate: back.rate }));
