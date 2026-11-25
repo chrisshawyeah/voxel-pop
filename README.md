@@ -111,6 +111,13 @@ Play: https://chrisshawyeah.github.io/voxel-pop/
   (`checkForUpdate()` in `js/main.js`). A reload that comes back as the old version (a stale
   cache) is tried again after a minute, never in a loop. Restarting a level just as a new version
   loads restarts it in the new version too.
+- Reopened, it loads at once, even in the middle of a level: when the page has just loaded, or
+  comes back after a minute or more away (hidden that long, or its frames stopped that long while
+  iOS held the app), the new version loads before the first touch. The level is saved as it is
+  first and comes back as it was left, or starts again when the new version changed it. A touch
+  before the new version is ready means it waits for a level boundary as above
+  (`reopened()` and `loadNewBuildWhenFree()` in `js/main.js`; `tools/reopen-check.mjs` proves it
+  in a browser).
 - `?level=7` at the end of the address opens level 7 once; the address then forgets it, so a
   reload comes back to the level being played. A number that is not a whole level from 1 to 20 is
   rounded and kept inside that range; when the browser blocks storage the game plays on and the
@@ -139,7 +146,7 @@ No build step and nothing to install. Every file is plain JavaScript the browser
 | Undo, the undo count, and the attempt kept in storage | `Attempt` in `js/logic.js` (a copy of the board before each send; `save()` and `restore()`); `undo()`, `saveAttempt()`, `savedAttempt()` in `js/main.js`. Change `RULES` in `js/logic.js` when a rules change makes old saves wrong |
 | Ready and covered fronts, asleep crew, the forecast marks and words, press and hold, the progress bar | `showReach()`, `forecastFor()`, `frontEvents()`, `inspect()` and `progress()` in `js/main.js` (`HOLD_MS`; `marksShown()`: levels up to `TEACH_UNTIL` always, the rest until the first hold); the forecast itself, strands and all, is `forecast()` and `fates()` in `js/logic.js`; their look in `css/game.css` |
 | The line preview, the lessons, the star | `preview()`, `teach()` and `showStar()` in `js/main.js` |
-| When a new version loads | `checkForUpdate()` and `reloadAt()` in `js/main.js` (`FRESH` lists every file that must come through first) |
+| When a new version loads | `checkForUpdate()`, `loadNewBuildWhenFree()` and `reloadAt()` in `js/main.js` (`FRESH` lists every file that must come through first) |
 | The look of the crew, pads, top bar and short-window layout | `css/game.css` |
 | Sounds | `js/audio.js` (every sound is made in code). Ordinary pops are soft and at most about 9 a second (`POP_GAP`); the bright rising notes are for a crew member finishing, a colour cleared and a win. |
 | The 3D look: cubes, lights, camera framing, chips, puffs, the build at a level's start | `js/render.js` |
