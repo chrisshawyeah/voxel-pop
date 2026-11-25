@@ -432,8 +432,12 @@ function sendAndWatch(st, ci) {
   return mine;
 }
 
+// The robot, no longer a level since levels 1 to 8 were made again on November 25th: a big board with
+// five pads, dealt here for the tests that send many crew at once.
+const robotLevel = () => dealLevel({ name: 'Robot', model: 'robot', cols: 5, pads: 5, crew: [50, 70], hidden: 0, mix: 0, flip: 0.6, deal: 1 });
+
 test('undo takes back the last send: cubes, lines, pads, shots in the air and the clock', () => {
-  const L = buildLevel(7);
+  const L = robotLevel();
   const a = new Attempt(L.board);
   assert.equal(a.canUndo, false, 'nothing to undo at the start');
   const before = [];
@@ -457,7 +461,7 @@ test('undo takes back the last send: cubes, lines, pads, shots in the air and th
   }
   assert.equal(a.canUndo, false);
   assert.equal(a.undo(), false);
-  assert.deepEqual(a.board.columns, buildLevel(7).board.columns, 'back to the start of the level');
+  assert.deepEqual(a.board.columns, robotLevel().board.columns, 'back to the start of the level');
 });
 
 // The cubes that can be hit, worked out from scratch from the cubes left: every cube with a face on
@@ -471,8 +475,7 @@ function hittable(b) {
 const hitList = b => b.exposed.map(set => [...set].sort((x, y) => x - y));
 
 test('Robot: the legs and feet under its body can be hit from the start, and all of them in the end', () => {
-  const n = LEVELS.findIndex(d => d.model === 'robot');
-  const L = buildLevel(n);
+  const L = robotLevel();
   const m = L.model, st = L.board;
   const grey = m.names.indexOf('grey'), charcoal = m.names.indexOf('charcoal');
   const y = i => Math.floor(i / m.sx) % m.sy;
@@ -509,8 +512,8 @@ test('Robot: the legs and feet under its body can be hit from the start, and all
 });
 
 test('undo, a saved attempt and every send give back exactly the cubes that can be hit', () => {
-  for (const n of [LEVELS.findIndex(d => d.model === 'robot'), LEVELS.findIndex(d => d.model === 'treehouse')]) {
-    const L = buildLevel(n);
+  for (const n of [-1, LEVELS.findIndex(d => d.model === 'treehouse')]) { // -1: the robot
+    const L = n < 0 ? robotLevel() : buildLevel(n);
     const a = new Attempt(cloneBoard(L.board));
     assert.deepEqual(hitList(a.board), hittable(a.board), `level ${n + 1} at the start`);
     const rand = rng(n + 40);
@@ -842,8 +845,8 @@ test('the forecast in words wraps to fit a phone, under a short condition', () =
 test('the deal picker\'s list mode ends with what it listed, not with "no deal"', () => {
   const r = spawnSync(process.execPath, ['tools/pick-deals.mjs', '1', '--list', '--tries=1'], { cwd: fileURLToPath(new URL('..', import.meta.url)), encoding: 'utf8' });
   assert.equal(r.status, 0, r.stderr);
-  assert.match(r.stderr, /^L1 Toadstool: deal \d+ /m, 'it lists deals');
-  assert.match(r.stdout.trim(), /^L1 Toadstool: \d+ deals? listed above/);
+  assert.match(r.stderr, /^L1 Doughnut: deal \d+ /m, 'it lists deals');
+  assert.match(r.stdout.trim(), /^L1 Doughnut: \d+ deals? listed above/);
   assert.doesNotMatch(r.stdout, /no deal/);
 });
 
@@ -963,7 +966,10 @@ for (let n = 0; n < LEVELS.length; n++) {
     assert.ok(fire <= 30, `the winning line takes ${fire.toFixed(1)} s to fire, more than 30`);
     const rate = greedyCheck(L.board);
     const hasty = hastyCheck(L.board);
-    const fc = forecastCheck(L.board), fch = hastyForecastCheck(L.board), back = backtrackCheck(L.board);
+    // The hasty follower is only printed, never checked, and on the big boards it is by far the slowest
+    // measure (most of an hour for the treasure chest): measured with HASTY_FOLLOWER=1.
+    const fc = forecastCheck(L.board), back = backtrackCheck(L.board);
+    const fch = process.env.HASTY_FOLLOWER ? hastyForecastCheck(L.board) : { rate: '-' };
     measured[n] = { fc: fc.rate, undos: back.undos };
     const [lo, hi] = def.greedy;
     console.log(`  L${n + 1} ${def.name}: ${L.board.total} cubes, ${L.shooters} crew, ${def.pads} pads, ${hidden} "?", plan wins in ${p.boards} boards, fires in ${fire.toFixed(1)} s; of ${GREEDY_PLAYS}: greedy ${rate}% (band ${lo}-${hi}%) hasty ${hasty}%; forecast follower ${fc.rate}% (band ${def.follow.join('-')}%, ${fc.sends} sends), hasty ${fch.rate}%; with undo ${back.rate}%, median ${back.undos ?? '-'} undos (at most ${def.undos}), ${back.sends} sends`);

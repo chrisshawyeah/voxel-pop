@@ -949,7 +949,10 @@ function say(text, ms) {
 // does the new version load, and only at a level boundary: a level with nothing sent or undone,
 // the start of another level, or the ending. Otherwise it keeps playing this version and tries
 // again next time. A level left half-played is kept (saveAttempt) and checked against the new
-// version when it comes back.
+// version when it comes back. One more moment counts as a boundary: the page coming back into view
+// after AWAY_MS or more away (the iPhone app reopened), until the player's first touch; a level
+// left half-played then loads in the new version as it was left, or starts again when the new
+// version changed it.
 // (vendor/RoundedBoxGeometry.js is no longer used but stays in place: older versions still fetch it
 // here before they load a new one.)
 const FRESH = ['css/game.css', 'js/main.js', 'js/render.js', 'js/fx.js', 'js/audio.js', 'js/levels.js', 'js/logic.js', 'js/models.js',
@@ -959,6 +962,7 @@ let checking = false;
 const lastReload = () => { const [build, at] = String(store.get(UPDATE_KEY) || '').split('@'); return { build, at: Number(at) || 0 }; };
 if (lastReload().build === BUILD) store.remove(UPDATE_KEY); // that reload worked
 async function checkForUpdate() {
+  noteBack();
   if (BUILD === 'dev' || newBuild || checking) return;
   checking = true;
   try {
@@ -975,6 +979,7 @@ async function checkForUpdate() {
     newBuild = live;
     if (state === 'done') reloadAt(0);
     else if (state === 'play' && !att.sends.length && !att.undos) reloadAt(current);
+    else if ((state === 'play' || state === 'jam') && backAt && touchedAt < backAt) { saveAttempt(); reloadAt(current); }
   } catch { /* offline: next time */ } finally { checking = false; }
 }
 // The page is left for the new version: from here on nothing plays and nothing is saved, so a
@@ -988,9 +993,25 @@ function reloadAt(n) {
   if (store.get(SAVE_KEY) !== String(n)) u.searchParams.set('level', n + 1); // storage blocked
   location.replace(u.href);
 }
+// When the page last went out of view, when it last came back after AWAY_MS or more away (0: it
+// has not), and when the player last touched it. Every check for a new version is a coming back
+// (a fresh load, the page in view again, the iPhone app to the front). Time away is measured two
+// ways, as either may be missing: from the page going out of view, and from a clock that ticks only
+// while the page runs, which iOS stops while the app is in the background (the app's own call may
+// also come before the page hears it is in view again).
+const AWAY_MS = 60000;
+let hiddenAt = 0, backAt = 0, touchedAt = 0, aliveAt = Date.now();
+setInterval(() => { aliveAt = Date.now(); }, 5000);
+function noteBack() {
+  const now = Date.now();
+  if ((hiddenAt && now - hiddenAt >= AWAY_MS) || now - aliveAt >= AWAY_MS) backAt = now;
+  hiddenAt = 0;
+  aliveAt = now;
+}
+document.addEventListener('pointerdown', () => { touchedAt = Date.now(); }, true);
 document.addEventListener('visibilitychange', () => {
   if (document.visibilityState === 'visible') checkForUpdate();
-  else { saveAttempt(); pressed.clear(); if (st) teach(); } // iOS may stop the page from here on: keep the board as it is; a lesson stops counting
+  else { hiddenAt = Date.now(); saveAttempt(); pressed.clear(); if (st) teach(); } // iOS may stop the page from here on: keep the board as it is; a lesson stops counting
 });
 window.addEventListener('pagehide', () => saveAttempt());
 window.addEventListener('pageshow', e => { if (e.persisted) checkForUpdate(); });

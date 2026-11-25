@@ -146,10 +146,10 @@ export const journeys = [
     name: "01-win",
     description: "Play level 1 to the end; the next level starts by itself, whole.",
     tag: "Win a level",
-    intro: "Maya sends her crew up one at a time until the toadstool is gone.",
+    intro: "Maya sends her crew up one at a time until the doughnut is gone.",
     steps: [
       { goto: "/voxel-pop/?level=1", caption: "Level 1" },
-      { expect: "Level 1", caption: "Toadstool" },
+      { expect: "Level 1", caption: "Doughnut" },
       { expect: "Tap the front crew", caption: "What to do" },
       {
         caption: "Ready crew shine, sends forecast",
@@ -306,7 +306,7 @@ export const journeys = [
       },
       { expect: "Clean clear", caption: "A clean clear" },
       { expect: "Level 2", caption: "Next level starts", highlight: true },
-      { caption: "A whole duck", run: async (ctx: any) => { await whole(ctx.page, 1); } },
+      { caption: "A whole snail", run: async (ctx: any) => { await whole(ctx.page, 1); } },
       { click: "#prev", caption: "Back to level 1" },
       {
         caption: "Level 1 keeps three stars",
@@ -315,8 +315,8 @@ export const journeys = [
           if (s.level !== 0 || !s.clean || s.stars !== 3 || s.lit !== 3) throw new Error(`level ${s.level + 1}: cleared clean ${s.clean}, best ${s.stars} stars, ${s.lit} lit in the top bar`);
         },
       },
-      { click: "#next", caption: "On to the duck" },
-      { caption: "Still a whole duck", run: async (ctx: any) => { await whole(ctx.page, 1); } },
+      { click: "#next", caption: "On to the snail" },
+      { caption: "Still a whole snail", run: async (ctx: any) => { await whole(ctx.page, 1); } },
     ],
   },
   {
@@ -381,7 +381,7 @@ export const journeys = [
       { click: "#prev", caption: "Back one" },
       { click: "#prev", caption: "Back again" },
       { expect: "Level 2", caption: "Level 2", highlight: true },
-      { caption: "The whole duck", run: async (ctx: any) => { ctx.state.crew = (await whole(ctx.page, 1)).crew; } },
+      { caption: "The whole snail", run: async (ctx: any) => { ctx.state.crew = (await whole(ctx.page, 1)).crew; } },
       {
         caption: "Crew go up",
         run: async (ctx: any) => {
