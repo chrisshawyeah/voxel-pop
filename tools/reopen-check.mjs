@@ -26,7 +26,8 @@ async function open(opts = {}) {
   const page = await ctx.newPage();
   const s = { doc: 'aaa1111', live: 'aaa1111', docs: 0, delay: 0, errors: [] };
   page.on('pageerror', e => s.errors.push(String(e.message)));
-  await page.route(u => u.pathname === '/' || u.pathname === '/index.html', async route => {
+  const home = new URL(BASE).pathname; // the game's own address, '/' or '/voxel-pop/'
+  await page.route(u => u.pathname === home || u.pathname === home + 'index.html', async route => {
     const isDoc = route.request().resourceType() === 'document';
     const r = await route.fetch();
     const html = (await r.text()).replace('name="build" content="dev"', `name="build" content="${isDoc ? s.doc : s.live}"`);
