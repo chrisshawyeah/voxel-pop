@@ -99,14 +99,15 @@ Play: https://chrisshawyeah.github.io/voxel-pop/
   left with a check of the board then. It is saved after every send and undo, when the page is
   hidden or closed, and when you move to another level, so a page the phone stopped in the
   background comes back exactly as it was, undo and all. A save from an older version of the level
-  (its settings, sculpture, deal or the rules changed: `levelPrint()` in `js/levels.js`, `RULES` in
-  `js/logic.js`) is turned down with "Level changed. Restarted.", and a broken one can never stop
-  the game: every field and tick is checked and bounded (`Attempt.restore()` in `js/logic.js`).
-  The single attempt very old versions kept carries no fingerprint, so its level starts again with
-  the same message.
-- A new version of the game loads only at a level boundary: a level with nothing sent or undone,
-  the start of another level, or the ending, and only once every one of its files has been
-  fetched whole; otherwise the old version plays on and it tries again later. The page checks as
+  (its sculpture, its crew, its pads or the rules changed, not just its name or test bands:
+  `levelPrint()` in `js/levels.js`, `RULES` in `js/logic.js`) is turned down with "Level changed.
+  Restarted.", and a broken one can never stop the game: every field and tick is checked and
+  bounded (`Attempt.restore()` in `js/logic.js`). The single attempt very old versions kept
+  carries no fingerprint, so its level starts again with the same message.
+- Unless the game was just reopened (next point), a new version loads only at a level boundary: a
+  level with nothing sent or undone, the start of another level, or the ending, and only once every
+  one of its files has been fetched whole; otherwise the old version plays on and it tries again
+  later. The page checks as
   it loads, when it comes back into view, and when the iPhone app comes back to the front
   (`checkForUpdate()` in `js/main.js`). A reload that comes back as the old version (a stale
   cache) is tried again after a minute, never in a loop. Restarting a level just as a new version
@@ -114,7 +115,8 @@ Play: https://chrisshawyeah.github.io/voxel-pop/
 - Reopened, it loads at once, even in the middle of a level: when the page has just loaded, or
   comes back after a minute or more away (hidden that long, or its frames stopped that long while
   iOS held the app), the new version loads before the first touch. The level is saved as it is
-  first and comes back as it was left, or starts again when the new version changed it. A touch
+  first and comes back as it was left, or starts again when the new version changed it (when
+  storage cannot keep it, the new version waits for a level boundary). A touch
   before the new version is ready means it waits for a level boundary as above
   (`reopened()` and `loadNewBuildWhenFree()` in `js/main.js`; `tools/reopen-check.mjs` proves it
   in a browser).
@@ -179,8 +181,9 @@ most 30 seconds to fire (`firingTime()`, on the game's clock).
 The curve is the forecast follower's win rate, level by level: each level's `follow` band in
 `js/levels.js`, and `undos`, the most undos the follower with undo may need in its median won play.
 Levels 1 to 3 teach (95 to 100%); 4 to 8 bring the first planned traps, which a player who reads
-the forecast always sees coming (92 to 100%), though one who sends whatever can shoot loses a
-quarter to a half of the time; 9 to 13 are the middle
+the forecast always sees coming (92 to 100%), though one who sends whatever can shoot loses from
+about one play in ten on the beehive up to about one in two on the treasure chest and the globe;
+9 to 13 are the middle
 (the follower wins from three plays in four down to one in two, with no undo needed), 14 to 20 are
 hard (from one play in two down to about one in four, three to five undos), each band a little
 lower than the one before, and level 19, the lantern, is the one breather (95 to 100%) before the

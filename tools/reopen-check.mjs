@@ -14,6 +14,13 @@
 //        G. left out of room: comes back out of room, and a tap on undo takes back the last send.
 //        H. the new version changed that level: it starts again, whole, and says "Level changed. Restarted."
 //        I. the new version was found while playing (a short look away), then away 61 s: loads it on coming back.
+//        J. played by keyboard only (Enter on a front): a short look away that finds the new version keeps the old one mid-level.
+//        K. touched after the page showed but before its first frame (and, with no visibility event, before its first frame): keeps it.
+//        L. a check still out from before the away (no answer yet): the reopen's own check still runs, and loads it.
+//        M. offline as it comes back, with the new version found before: no reload, the level plays on.
+//        N. storage full at the reopen: no reload, the level plays on as left.
+//        O. storage blocked: the arrows (a level boundary) do not reload while a level left half-played lives only in memory.
+//        P. stars, clean clears and cleared marks won on a level that has changed since go; the rest stay.
 import { createRequire } from 'node:module';
 const require = createRequire(process.env.HOME + '/code/package.json');
 const { chromium } = require('playwright');
@@ -25,21 +32,24 @@ const ok = (c, what) => { console.log(c ? 'ok ' : 'BAD', what); if (!c) bad++; }
 async function open(opts = {}) {
   const ctx = await browser.newContext({ viewport: { width: 390, height: 844 } });
   const page = await ctx.newPage();
-  const s = { doc: 'aaa1111', live: 'aaa1111', docs: 0, delay: 0, errors: [] };
+  const s = { doc: 'aaa1111', live: 'aaa1111', docs: 0, delay: 0, hang: 0, offline: false, served: '', errors: [] };
   page.on('pageerror', e => s.errors.push(String(e.message)));
   const home = new URL(BASE).pathname; // the game's own address, '/' or '/voxel-pop/'
   await page.route(u => u.pathname === home || u.pathname === home + 'index.html', async route => {
     const isDoc = route.request().resourceType() === 'document';
+    if (s.offline) { if (isDoc) s.docs++; return route.abort('internetdisconnected'); }
     const r = await route.fetch();
-    const html = (await r.text()).replace('name="build" content="dev"', `name="build" content="${isDoc ? s.doc : s.live}"`);
-    if (isDoc) { s.docs++; if (s.afterDoc) { s.doc = s.afterDoc; s.afterDoc = null; } }
+    const mark = isDoc ? s.doc : s.live;
+    const html = (await r.text()).replace('name="build" content="dev"', `name="build" content="${mark}"`);
+    if (isDoc) { s.docs++; s.served = mark; if (s.afterDoc) { s.doc = s.afterDoc; s.afterDoc = null; } }
     else if (s.delay) await new Promise(res => setTimeout(res, s.delay));
-    await route.fulfill({ response: r, body: html, headers: { ...r.headers(), 'cache-control': 'no-store' } });
+    else if (s.hang) { const ms = s.hang; s.hang = 0; await new Promise(res => setTimeout(res, ms)); } // this one ask gets no answer for that long
+    try { await route.fulfill({ response: r, body: html, headers: { ...r.headers(), 'cache-control': 'no-store' } }); } catch { /* given up on, or the page is gone */ }
   });
   await page.route(u => u.pathname.endsWith('/js/levels.js'), async route => {
     const r = await route.fetch();
     let js = await r.text();
-    if (s.changeLevel2) js += "\nLEVELS[1].name += ', changed';\n"; // the new version changed level 2
+    if (s.changeLevel2) js += "\nLEVELS[1].name += ', changed'; LEVELS[1].pads += 1;\n"; // the new version changed level 2 (its play, not only its name)
     await route.fulfill({ response: r, body: js, headers: { ...r.headers(), 'cache-control': 'no-store' } });
   });
   return { ctx, page, s };
@@ -48,14 +58,16 @@ const loaded = page => page.waitForFunction(() => window.crumble && document.get
 const build = page => page.evaluate(() => document.querySelector('meta[name="build"]').content);
 const snap = page => page.evaluate(() => { const x = window.crumble.snapshot(); return { state: x.state, level: x.level, cleared: x.cleared, hash: x.hash, lines: x.lines, pads: String(x.pads).replace(/\+\d+/g, ''), flying: x.flying, sends: x.sends, undos: x.undos }; });
 const quiet = page => page.evaluate(() => { const st = window.crumble.board; return !st.flying.length && st.slots.every(s => !s || (!(s.land > 0) && st.exposed[s.color].size === 0)); });
-async function sendTwo(page) {
+// `keys`: by keyboard only, focus on the front and Enter, no pointer at all.
+async function sendTwo(page, keys = false) {
   for (let k = 0; k < 2; k++) {
     const i = await page.evaluate(() => {
       const st = window.crumble.board;
       const lines = st.columns.map((c, i) => (c.length ? i : -1)).filter(i => i >= 0);
       return lines.find(i => st.exposed[st.columns[i][0].color].size > 0) ?? lines[0];
     });
-    await page.locator('#queues .col').nth(i).locator('button.front').click({ timeout: 20000 });
+    const front = page.locator('#queues .col').nth(i).locator('button.front');
+    if (keys) { await front.focus({ timeout: 20000 }); await page.keyboard.press('Enter'); } else await front.click({ timeout: 20000 });
     await page.waitForTimeout(250);
   }
   const end = Date.now() + 30000;
@@ -65,21 +77,31 @@ async function sendTwo(page) {
 const holdFrames = page => page.evaluate(() => { window.__raf = window.requestAnimationFrame; window.__held = []; window.requestAnimationFrame = cb => { window.__held.push(cb); return 0; }; });
 const freeFrames = page => page.evaluate(() => { window.requestAnimationFrame = window.__raf; window.__held.forEach(cb => window.__raf(cb)); });
 const shiftClock = (page, ms) => page.evaluate(ms => { const real = Date.now.bind(Date); Date.now = () => real() + ms; }, ms);
+const turn = async page => { // a touch: a turn of the sculpture
+  const box = await page.locator('#stage').boundingBox();
+  await page.mouse.move(box.x + box.width / 2, box.y + box.height / 2); await page.mouse.down();
+  await page.mouse.move(box.x + box.width / 2 + 40, box.y + box.height / 2, { steps: 4 }); await page.mouse.up();
+};
+const blockStorage = () => { Storage.prototype.setItem = () => { throw new DOMException('full', 'QuotaExceededError'); }; };
 const vis = (page, v) => page.evaluate(v => { Object.defineProperty(document, 'visibilityState', { configurable: true, get: () => v }); document.dispatchEvent(new Event('visibilitychange')); }, v);
 async function reloadedTo(page, s, docsBefore, ms = 8000) {
   const end = Date.now() + ms;
   while (Date.now() < end) {
-    if (s.docs > docsBefore) { await loaded(page); await page.waitForTimeout(400); return true; }
+    if (s.docs > docsBefore) { // counted as it is asked for: wait for that document itself, not the one going
+      await page.waitForFunction(b => document.querySelector('meta[name="build"]')?.content === b && window.crumble && document.getElementById('loading').hidden, s.served, { timeout: 30000, polling: 100 }); // the page going may have its frames held
+      await page.waitForTimeout(400); return true;
+    }
     await page.waitForTimeout(100);
   }
   return false;
 }
 
-async function half(level = 2) {
+async function half(level = 2, { keys = false, init = null } = {}) {
   const o = await open();
+  if (init) await o.ctx.addInitScript(init);
   await o.page.goto(BASE + '?level=' + level);
   await loaded(o.page); await o.page.waitForTimeout(1800); // the load's own check finds nothing new
-  await sendTwo(o.page);
+  await sendTwo(o.page, keys);
   o.was = await snap(o.page);
   o.s.live = 'bbb2222'; o.s.doc = 'bbb2222';
   return o;
@@ -125,9 +147,7 @@ async function half(level = 2) {
   s.delay = 2500;
   await vis(page, 'hidden'); await holdFrames(page); await shiftClock(page, 61000); await vis(page, 'visible'); await freeFrames(page);
   await page.waitForTimeout(300);
-  const box = await page.locator('#stage').boundingBox(); // a touch while the check is out: a turn of the sculpture
-  await page.mouse.move(box.x + box.width / 2, box.y + box.height / 2); await page.mouse.down();
-  await page.mouse.move(box.x + box.width / 2 + 40, box.y + box.height / 2, { steps: 4 }); await page.mouse.up();
+  await turn(page); // a touch while the check is out
   const re = await reloadedTo(page, s, d, 6000);
   ok(!re && (await build(page)) === 'aaa1111', `D. touched before the check came back: kept the old version (${re ? 'reloaded' : 'kept'})`);
   const now = await snap(page);
@@ -165,7 +185,7 @@ async function half(level = 2) {
   await vis(page, 'hidden'); await shiftClock(page, 61000); await vis(page, 'visible');
   const end = Date.now() + 8000;
   while (s.docs === d && Date.now() < end) await page.waitForTimeout(100);
-  await page.waitForFunction(() => window.crumble && window.crumble.board, null, { timeout: 30000 });
+  await page.waitForFunction(() => window.crumble && window.crumble.board, null, { timeout: 30000, polling: 100 }); // its frames are held: no polling by frame
   const now = await page.evaluate(() => window.crumble.snapshot());
   const diff = Object.keys(was).filter(k => JSON.stringify(was[k]) !== JSON.stringify(now[k]));
   ok(moving, `F. left while crew were still moving (shots in the air: ${String(was.flying || '') || 'none'}; pads ${was.pads})`);
@@ -237,6 +257,103 @@ async function half(level = 2) {
   const re = await reloadedTo(page, s, d);
   const now = re && await snap(page);
   ok(re && (await build(page)) === 'bbb2222' && JSON.stringify(now) === JSON.stringify(was), `I. then away 61 s: on coming back it loaded the new version, level as left (${re ? 'reloaded' : 'no reload'})`);
+  await ctx.close();
+}
+{ // J
+  const { ctx, page, s, was } = await half(2, { keys: true });
+  const d = s.docs;
+  await vis(page, 'hidden'); await shiftClock(page, 5000); await vis(page, 'visible'); // a short look away finds the new version
+  const re = await reloadedTo(page, s, d, 4000);
+  const now = await snap(page);
+  ok(!re && (await build(page)) === 'aaa1111' && now.sends === was.sends && now.state === 'play', `J. played by keyboard only: kept the old version mid-level (${re ? 'reloaded' : `kept, ${now.sends} sends`})`);
+  await ctx.close();
+}
+{ // K
+  for (const shown of [true, false]) {
+    const { ctx, page, s } = await half();
+    const d = s.docs;
+    s.delay = 2500;
+    if (shown) await vis(page, 'hidden');
+    await holdFrames(page); await shiftClock(page, 61000);
+    if (shown) await vis(page, 'visible'); // the check goes out
+    await turn(page); // a touch before the first frame since coming back
+    await freeFrames(page);
+    const re = await reloadedTo(page, s, d, 6000);
+    ok(!re && (await build(page)) === 'aaa1111', `K. ${shown ? 'hidden then visible' : 'frames held, no visibility event'}, touched before the first frame: kept the old version (${re ? 'reloaded' : 'kept'})`);
+    await ctx.close();
+  }
+}
+{ // L
+  const { ctx, page, s } = await half();
+  const d = s.docs;
+  s.hang = 20000; // the next ask for the live page gets no answer
+  await vis(page, 'hidden'); await vis(page, 'visible'); await page.waitForTimeout(300); // a short look away: that check goes out
+  await vis(page, 'hidden'); await holdFrames(page); await shiftClock(page, 61000); await vis(page, 'visible'); // still out on coming back
+  const re = await reloadedTo(page, s, d);
+  ok(re && (await build(page)) === 'bbb2222', `L. a check still out from before the away: the reopen's own check loaded the new version (${re ? await build(page) : 'no reload'})`);
+  await ctx.close();
+}
+{ // M
+  const { ctx, page, s, was } = await half();
+  await vis(page, 'hidden'); await shiftClock(page, 5000); await vis(page, 'visible'); // a short look away finds the new version
+  ok(!(await reloadedTo(page, s, s.docs, 4000)), 'M. found while playing, kept the old version');
+  s.offline = true;
+  const d = s.docs;
+  await vis(page, 'hidden'); await holdFrames(page); await shiftClock(page, 61000); await vis(page, 'visible');
+  await page.waitForTimeout(6000);
+  ok(s.docs === d, `M. offline on coming back: no reload (${s.docs === d ? 'none tried' : 'a reload was tried'})`);
+  const now = (await page.evaluate(() => !!window.crumble).catch(() => false)) && await snap(page);
+  ok(now && JSON.stringify(now) === JSON.stringify(was), `M. the level plays on as left (${now ? `${now.state}, ${now.sends} sends` : 'no game on the page'})`);
+  await ctx.close();
+}
+{ // N
+  const { ctx, page, s, was } = await half();
+  await page.evaluate(blockStorage); // storage full from here on
+  const d = s.docs;
+  await vis(page, 'hidden'); await holdFrames(page); await shiftClock(page, 61000); await vis(page, 'visible');
+  const re = await reloadedTo(page, s, d, 6000);
+  const now = await snap(page);
+  ok(!re && (await build(page)) === 'aaa1111' && JSON.stringify(now) === JSON.stringify(was), `N. storage full at the reopen: no reload, level as left (${re ? 'reloaded' : `kept, ${now.sends} sends`})`);
+  await ctx.close();
+}
+{ // O
+  const { ctx, page, s, was } = await half(2, { init: blockStorage });
+  await vis(page, 'hidden'); await shiftClock(page, 5000); await vis(page, 'visible'); // a short look away finds the new version
+  ok(!(await reloadedTo(page, s, s.docs, 4000)), 'O. found while playing, kept the old version');
+  const d = s.docs;
+  await page.locator('#next').click({ timeout: 20000 });
+  const re = await reloadedTo(page, s, d, 3000);
+  ok(!re && (await page.evaluate(() => window.crumble.level)) === was.level + 1, `O. storage blocked, the next level: no reload while level ${was.level + 1} lives only in memory (${re ? 'reloaded' : 'kept'})`);
+  if (!re) {
+    await page.locator('#prev').click({ timeout: 20000 });
+    const re2 = await reloadedTo(page, s, d, 3000);
+    const now = !re2 && await snap(page);
+    ok(!re2 && JSON.stringify(now) === JSON.stringify(was), `O. and back: level ${was.level + 1} as left (${re2 ? 'reloaded' : `${now.sends} sends`})`);
+  }
+  await ctx.close();
+}
+{ // P
+  const { ctx, page } = await open();
+  await page.goto(BASE + '?level=2');
+  await loaded(page);
+  const keys = () => page.evaluate(() => ['stars', 'cleared-levels', 'clean-levels', 'all-cleared', 'level'].map(k => localStorage.getItem('crumble-crew.' + k)).join(' '));
+  const all = String(2 ** 20 - 1);
+  const print2 = await page.evaluate(async () => (await import(new URL('js/levels.js', location.href).href)).levelPrint(1));
+  await page.evaluate(([all, print2]) => { // level 2 won on the level as it is now, every other one on another
+    const set = (k, v) => localStorage.setItem('crumble-crew.' + k, v);
+    set('stars', '3'.repeat(20)); set('cleared-levels', all); set('clean-levels', all); set('all-cleared', '2');
+    set('progress-prints', JSON.stringify(Array.from({ length: 20 }, (_, n) => (n === 1 ? print2 : 'old'))));
+  }, [all, print2]);
+  await page.reload(); await loaded(page);
+  const one = await keys(), stars1 = await page.evaluate(() => window.crumble.stars);
+  ok(one === `03${'0'.repeat(18)} 2 2 2 1` && stars1 === 3, `P. only level 2's marks fit the levels as they are, and only they stay (${one}; level 2 shows ${stars1} stars)`);
+  await page.evaluate(all => { // from before the fingerprints were kept
+    const set = (k, v) => localStorage.setItem('crumble-crew.' + k, v);
+    set('stars', '3'.repeat(20)); set('cleared-levels', all); set('clean-levels', all); localStorage.removeItem('crumble-crew.progress-prints');
+  }, all);
+  await page.reload(); await loaded(page);
+  const two = await keys(), stars2 = await page.evaluate(() => window.crumble.stars);
+  ok(two === `${'0'.repeat(20)} 0 0 2 1` && stars2 === 0, `P. marks from before the fingerprints all go, all-cleared and the level stay (${two}; level 2 shows ${stars2} stars)`);
   await ctx.close();
 }
 await browser.close();

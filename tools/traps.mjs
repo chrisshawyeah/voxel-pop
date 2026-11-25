@@ -12,7 +12,7 @@
 //                                         into js/levels.js; with --measure, only deals whose
 //                                         planned line holds and fires within 30 s, and those
 //                                         with traps measured as tools/difficulty.mjs does
-//   node tools/traps.mjs design umbrella --cols=3 --pads=3 --crew=70,110 --hidden=1 --deal=4
+//   node tools/traps.mjs design globe --cols=3 --pads=3 --crew=70,110 --hidden=1 --deal=4
 //        [--seed=1 --steps=200]
 //                                         starts from that deal and moves crew between and along
 //                                         the lines, one change at a time, keeping a change that
@@ -38,11 +38,12 @@ function known(board) {
   return st;
 }
 
-// The board after the first k sends of `line`, waiting for the pads to stop after each.
+// The board after the first k sends of `line`, waiting for the pads to stop after each; null when
+// one of them cannot be sent (its line is empty, or no pad is free).
 export function after(board, line, k) {
   const st = known(board);
   settle(st);
-  for (let i = 0; i < k; i++) { deploy(st, line[i]); settle(st); }
+  for (let i = 0; i < k; i++) { if (!deploy(st, line[i])) return null; settle(st); }
   return st;
 }
 
@@ -77,10 +78,11 @@ export function findTraps(board, line, budget = BUDGET) {
 export function checkTraps(n) {
   const L = buildLevel(n), def = L.def, misses = [];
   const st = after(L.board, def.solution, def.solution.length);
+  if (!st) return [`send ${def.solution.findIndex((_, i) => !after(L.board, def.solution, i + 1)) + 1} of the solution cannot happen`];
   if (st.cleared !== st.total) misses.push(`the solution leaves ${st.total - st.cleared} cubes`);
   for (const [k, j] of def.traps) {
     const at = after(L.board, def.solution, k);
-    if (!tempting(at, j)) misses.push(`trap [${k}, ${j}]: line ${j + 1}'s front crew member has nothing to shoot`);
+    if (!at || !tempting(at, j)) misses.push(`trap [${k}, ${j}]: line ${j + 1}'s front crew member has nothing to shoot`);
     else if (loses(at, j) !== true) misses.push(`trap [${k}, ${j}]: sending line ${j + 1} does not lose`);
   }
   return misses;
@@ -183,12 +185,12 @@ if (cmd === 'check') {
     const at = () => { const ci = Math.floor(rand() * next.length); return [ci, Math.floor(rand() * next[ci].length)]; };
     const [a, i] = at(), [b, j] = at();
     if (rand() < 0.5) [next[a][i], next[b][j]] = [next[b][j], next[a][i]]; // two crew swap places
-    else { const [s] = next[a].splice(i, 1); next[b].splice(Math.min(j, next[b].length), 0, s); } // one moves to another place
-    if (!playable(next)) continue;
+    else { const [s] = next[a].splice(i, 1); next[b].splice(Math.floor(rand() * (next[b].length + 1)), 0, s); } // one moves to another place
+    if (!playable(next) || JSON.stringify(next) === JSON.stringify(cols)) continue;
     const r = judge(next);
     if (r.score >= best.score) { cols = next; best = r; console.log(JSON.stringify({ step, moments: r.moments, score: r.score })); }
   }
-  if (!(best.moments >= 1)) { console.log(JSON.stringify({ done: false, moments: best.moments })); process.exit(0); }
+  if (!(best.moments >= 1 && best.moments <= 3)) { console.log(JSON.stringify({ done: false, moments: best.moments })); process.exit(1); }
   const st = best.st;
   const holds = lineHolds(st, best.line), fire = firingTime(st, best.line);
   const fc = forecastCheck(st), back = backtrackCheck(st);

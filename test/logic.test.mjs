@@ -374,13 +374,15 @@ test('crew of a vanished colour leave', () => {
 });
 
 test('a level is dealt once and handed out fresh', () => {
-  const a = buildLevel(3), b = buildLevel(3);
+  const n = LEVELS.findIndex(d => !d.lines); // a level dealt from its settings
+  assert.ok(n >= 0, 'some level is dealt from its settings');
+  const a = buildLevel(n), b = buildLevel(n);
   assert.notEqual(a.board, b.board);
   assert.deepEqual(a.board.columns, b.board.columns);
   deploy(a.board, 0); settle(a.board);
-  assert.deepEqual(buildLevel(3).board.columns, b.board.columns, 'playing a copy leaves the kept level alone');
-  assert.equal(buildLevel(3).board.cleared, 0);
-  assert.deepEqual(dealLevel(LEVELS[3]).board.columns, b.board.columns, 'the stored deal is built directly from its settings');
+  assert.deepEqual(buildLevel(n).board.columns, b.board.columns, 'playing a copy leaves the kept level alone');
+  assert.equal(buildLevel(n).board.cleared, 0);
+  assert.deepEqual(dealLevel(LEVELS[n]).board.columns, b.board.columns, 'the stored deal is built directly from its settings');
 });
 
 test('the planning player treats a "?" as unknown until it reaches the front', () => {
@@ -639,6 +641,13 @@ test('a level\'s fingerprint is its own and stays the same', () => {
   const prints = LEVELS.map((_, n) => levelPrint(n));
   assert.equal(new Set(prints).size, LEVELS.length, 'every level has its own');
   assert.equal(levelPrint(4), prints[4], 'and the same one each time');
+  // Only what decides play counts, so a renamed level is not restarted on reopening.
+  const n = LEVELS.findIndex(d => d.lines && !d.hidden), def = LEVELS[n];
+  const printAs = changed => { LEVELS[n] = { ...def, ...changed }; try { return levelPrint(n); } finally { LEVELS[n] = def; } };
+  assert.equal(printAs({ name: `${def.name}, renamed`, greedy: [0, 100], follow: [0, 100], undos: 6, traps: [] }), prints[n], 'a new name, test band or trap keeps it');
+  assert.notEqual(printAs({ pads: def.pads + 1 }), prints[n], 'a pad more changes it');
+  const [first, ...others] = def.lines;
+  assert.notEqual(printAs({ lines: [first.split(',').reverse().join(','), ...others] }), prints[n], 'and so does a line of crew in another order');
 });
 
 test('the shot the screen draws is the rules\' own record of it', () => {
@@ -663,11 +672,12 @@ test('a "?" stays a "?" only while there is more than one crew it could be', () 
   const same = makeBoard(stack(1, 1));
   same.columns = [[crew(0, 0, 1), h(1, 0, 1)], [crew(2, 0, 1), h(3, 0, 1)]];
   assert.equal(revealLone(same).length, 2);
-  for (let n = 0; n < LEVELS.length; n++) {
-    if (LEVELS[n].hidden !== 1) continue;
-    const L = buildLevel(n);
+  const dealt = LEVELS.filter(d => !d.lines);
+  assert.ok(dealt.length > 0, 'some level is dealt from its settings');
+  for (const def of dealt) {
+    const L = dealLevel({ ...def, hidden: 1 });
     assert.equal(L.hidden, 1);
-    assert.equal(L.board.columns.flat().filter(s => s.hidden).length, 0, `level ${n + 1}: its one hidden crew member is shown`);
+    assert.equal(L.board.columns.flat().filter(s => s.hidden).length, 0, `${def.name} dealt with one hidden crew member shows it`);
   }
 });
 
@@ -1008,6 +1018,12 @@ for (let n = 0; n < LEVELS.length; n++) {
     assert.deepEqual(misses, [], misses.join('; '));
   });
 }
+
+test('a written solution with a send that cannot happen is refused', () => {
+  const n = LEVELS.findIndex(d => d.lines), def = LEVELS[n];
+  LEVELS[n] = { ...def, solution: [...def.solution, def.solution.at(-1)] };
+  try { assert.match(checkTraps(n).join('; '), /send \d+ of the solution cannot happen/); } finally { LEVELS[n] = def; }
+});
 
 test('crew written out by hand are read as written, and a line that cannot be played is refused', () => {
   const n = LEVELS.findIndex(d => d.lines);

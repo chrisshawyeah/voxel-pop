@@ -18,6 +18,7 @@ const DONE_KEY = 'crumble-crew.all-cleared';       // how many times every level
 const CLEARED_KEY = 'crumble-crew.cleared-levels'; // which levels have been won since then, one bit each
 const CLEAN_KEY = 'crumble-crew.clean-levels';     // which levels have been won with no undo, one bit each
 const STARS_KEY = 'crumble-crew.stars';            // the most stars each level has been won with, one digit a level
+const PRINTS_KEY = 'crumble-crew.progress-prints'; // each level's fingerprint (levelPrint) as its stars and bits above were won
 const ATTEMPT_KEY = n => `crumble-crew.attempt.${n + 1}`; // level n half-played, by its number on screen
 const OLD_ATTEMPT_KEY = 'crumble-crew.attempt';    // the one attempt the game kept before, for any level
 const TAUGHT_KEY = 'crumble-crew.taught';          // the lessons seen, one bit each (SENT, PARK, TICK below)
@@ -30,6 +31,8 @@ const NEXT_AFTER = 2400;  // milliseconds of confetti and stars before the next 
 const HOLD_MS = 300;      // a touch held this long on a front shows what sending it would do, and sends nobody
 const RETRY_MS = 60000;   // a reload that came back as the old version is tried again after this long
 const AWAY_MS = 60000;    // back after this long away, the game counts as reopened (a new version loads before the first touch)
+const CHECK_MS = 30000;   // a check for a new version out longer than this (on the clock, so one frozen with the page counts) no longer holds up the next
+const LIVE_MS = 5000;     // how long the live page has to answer
 const LAST = LEVELS.length - 1;
 const TEACH_UNTIL = 2;    // levels 1 to 3 teach the first send and always show the forecast under each front
 const BUILD = document.querySelector('meta[name="build"]')?.content || 'dev';
@@ -69,8 +72,8 @@ let L, att, st, gen = 0, state = 'play', jamClock = 0, winClock = 0, bannerTimer
 let padEls = [], fronts = [];
 let previewOf = -1;          // the line whose preview is open, -1 when none
 let newBuild = '';           // a new version of the game is live and every file of it is fetched; it loads at the next level boundary
-let reopenedAt = Date.now(); // when the page was last loaded, or came back after AWAY_MS or more away
-let touchedAt = 0;           // the last touch on the page
+let reopenedAt = Date.now(); // a touch after this came after the page was last loaded, or came back after AWAY_MS or more away
+let touchedAt = 0;           // the last touch, click or key on the page
 let hiddenAt = 0;            // when the page was hidden, 0 while it shows
 let lastWall = Date.now();   // the clock at the last frame: a gap of AWAY_MS or more means iOS held the page that long
 let dragged = 0;             // how far the last press on the sculpture moved, in pixels
@@ -83,6 +86,20 @@ let cleanMask = Number(store.get(CLEAN_KEY)) || 0;
 const starsFor = undos => (undos === 0 ? 3 : undos <= 2 ? 2 : 1);
 const bestStars = String(store.get(STARS_KEY) || '').padEnd(LEVELS.length, '0').slice(0, LEVELS.length).split('').map(d => Math.min(3, Number(d) || 0));
 LEVELS.forEach((_, n) => { if (cleanMask & bit(n)) bestStars[n] = 3; });
+// Stars and bits won on a level that has changed since (another sculpture under its number) are
+// not the new level's: they go, and all-cleared and the level being played stay. Those kept from
+// before the fingerprints were kept come from levels that have all changed since (9 to 20 on
+// 23nov, 1 to 8 on 25nov), so they all go.
+const wonOn = (() => { try { const p = JSON.parse(store.get(PRINTS_KEY)); return Array.isArray(p) ? p : []; } catch { return []; } })();
+if (LEVELS.map((_, n) => {
+  if (!bestStars[n] && !((clearedMask | cleanMask) & bit(n))) return false; // nothing won there
+  if (wonOn[n] && wonOn[n] === levelPrint(n)) return false;
+  bestStars[n] = 0; clearedMask &= ~bit(n); cleanMask &= ~bit(n); wonOn[n] = null;
+  return true;
+}).some(Boolean)) {
+  store.set(STARS_KEY, bestStars.join('')); store.set(CLEARED_KEY, clearedMask); store.set(CLEAN_KEY, cleanMask);
+  store.set(PRINTS_KEY, JSON.stringify(wonOn));
+}
 const STAR_SVG = '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="m12 2.8 2.7 5.6 6.1.8-4.5 4.2 1.1 6.1L12 16.6l-5.4 2.9 1.1-6.1-4.5-4.2 6.1-.8z"/></svg>';
 const starRow = n => [1, 2, 3].map(k => STAR_SVG.replace('<svg', `<svg class="${k <= n ? 'on' : 'off'}"`)).join('');
 let allCleared = Number(store.get(DONE_KEY)) || 0;
@@ -106,10 +123,11 @@ const crewName = s => (s.hidden ? 'a hidden crew member' : `${names()[s.color]} 
 // a level back as it was left even when storage is blocked or full.
 const printOf = n => `${levelPrint(n)}:${LAND}`;
 const kept = new Map(); // level -> its attempt as it was left, this visit
+const attemptText = (n, a) => JSON.stringify({ fp: printOf(n), ...a.save() }); // level n's attempt as storage keeps it
 function saveAttempt() {
   if (!att || (state !== 'play' && state !== 'jam')) return;
   if (!att.sends.length && !att.undos) { kept.delete(current); store.remove(ATTEMPT_KEY(current)); }
-  else { kept.set(current, att); store.set(ATTEMPT_KEY(current), JSON.stringify({ fp: printOf(current), ...att.save() })); }
+  else { kept.set(current, att); store.set(ATTEMPT_KEY(current), attemptText(current, att)); }
 }
 function forgetAttempt(n) { kept.delete(n); store.remove(ATTEMPT_KEY(n)); }
 // Level n's attempt as it was left (from memory, else played back from storage); 'changed' when
@@ -160,7 +178,7 @@ function start(n, fresh = false) {
   n = Number.isFinite(n) ? ((n % LEVELS.length) + LEVELS.length) % LEVELS.length : 0; // the arrows wrap around
   if (att && n !== current) saveAttempt(); // the level being left is kept as it is now
   if (fresh) forgetAttempt(n);
-  if (newBuild) return reloadAt(n); // a level boundary: the new version loads now (and nothing more is saved)
+  if (newBuild && reloadAt(n)) return; // a level boundary: the new version loads now (and nothing more is saved)
   gen++;
   current = n;
   syncAddress(store.set(SAVE_KEY, current) && store.get(SAVE_KEY) === String(current));
@@ -821,6 +839,7 @@ function win() {
   $('undo').disabled = true;
   closePreview(); inspect(-1); teach();
   forgetAttempt(current);
+  wonOn[current] = levelPrint(current); store.set(PRINTS_KEY, JSON.stringify(wonOn)); // what the marks below were won on
   clearedMask |= bit(current);
   store.set(CLEARED_KEY, clearedMask);
   if (clean) { cleanMask |= bit(current); store.set(CLEAN_KEY, cleanMask); }
@@ -884,6 +903,7 @@ function jam() {
 // switch's own click (js/audio.js) is not one.
 window.addEventListener('click', e => {
   if (!e.isTrusted) return;
+  touchedAt = Date.now(); // a key, or assistive tech, can click with no pointer down
   if (held && e.detail !== 0) {
     held = false;
     e.stopPropagation(); e.preventDefault();
@@ -903,7 +923,7 @@ window.addEventListener('click', e => {
   else if (att.canUndo) undo();
   else start(current, true);
 }, true);
-window.addEventListener('keydown', e => { if (e.key === 'Escape') closePreview(); });
+window.addEventListener('keydown', e => { touchedAt = Date.now(); if (e.key === 'Escape') closePreview(); }); // a key counts as a touch
 // Every new press starts clean: a hold whose click never came (some browsers drop it after a long
 // press) must not swallow the next tap, wherever it lands. While a finger is down (holding a front,
 // turning the sculpture) the ticks run at 1x, even with every pad taken (R.pace).
@@ -918,7 +938,9 @@ function frame(now) {
   const dt = Math.max(0, Math.min(0.05, (now - last) / 1000)); // the first frame's time can come before the script's
   last = now;
   const wall = Date.now();
-  if (wall - lastWall >= AWAY_MS) reopened(); // the frames stopped that long: the page was away
+  // The frames stopped that long: the page was away. A touch since the last frame came after it
+  // (one handled before this frame, or after the page showed and said so first).
+  if (wall - lastWall >= AWAY_MS) reopened(lastWall);
   lastWall = wall;
   if (state === 'play') tick(dt);
   showView(dt);
@@ -967,17 +989,21 @@ function say(text, ms) {
 // here before they load a new one.)
 const FRESH = ['css/game.css', 'js/main.js', 'js/render.js', 'js/fx.js', 'js/audio.js', 'js/levels.js', 'js/logic.js', 'js/models.js',
   'vendor/three.module.js', 'vendor/three.core.js'];
-let checking = false;
+let checking = 0; // when the check out now started (Date.now), 0 when none is
 // The version the page last reloaded to load, and when: "abc1234@1762850000000".
 const lastReload = () => { const [build, at] = String(store.get(UPDATE_KEY) || '').split('@'); return { build, at: Number(at) || 0 }; };
 if (lastReload().build === BUILD) store.remove(UPDATE_KEY); // that reload worked
+// The live page's build, fetched past every cache; '' when it is not there, a throw when it does
+// not answer within LIVE_MS.
+async function liveBuild() {
+  const page = await fetch(location.pathname, { cache: 'reload', signal: globalThis.AbortSignal?.timeout?.(LIVE_MS) });
+  return (page.ok && /<meta name="build" content="([^"]*)"/.exec(await page.text())?.[1]) || '';
+}
 async function checkForUpdate() {
-  if (BUILD === 'dev' || newBuild || checking) return;
-  checking = true;
+  if (BUILD === 'dev' || newBuild || Date.now() - checking < CHECK_MS) return;
+  const started = checking = Date.now();
   try {
-    const page = await fetch(location.pathname, { cache: 'reload' });
-    if (!page.ok) return;
-    const live = /<meta name="build" content="([^"]*)"/.exec(await page.text())?.[1];
+    const live = await liveBuild();
     if (!live || live === BUILD || live === 'dev') return;
     // The page reloaded for this version under a minute ago and still came back old: give the cache
     // time to let go, then try again (the next check after that, at a level boundary as always).
@@ -985,30 +1011,33 @@ async function checkForUpdate() {
     if (was.build === live && Math.abs(Date.now() - was.at) < RETRY_MS) return;
     const got = await Promise.all(FRESH.map(f => fetch(f, { cache: 'reload' }).then(r => r.ok && r.arrayBuffer().then(() => true), () => false)));
     if (!got.every(Boolean)) return; // a file did not come: no mix of old and new, try again later
+    if (checking !== started) return; // a newer check is out (this one was held past CHECK_MS): it decides
     newBuild = live;
     loadNewBuildWhenFree();
-  } catch { /* offline: next time */ } finally { checking = false; }
+  } catch { /* offline: next time */ } finally { if (checking === started) checking = 0; }
 }
-function reopened() {
-  reopenedAt = Date.now();
+// `at`: a touch after it came after the page came back.
+function reopened(at = Date.now()) {
+  reopenedAt = at;
   if (newBuild) loadNewBuildWhenFree(); else checkForUpdate();
 }
 // The new version loads now when nothing is lost by it: at the ending, on a level with nothing sent
-// or undone, or reopened and not touched since, with the level saved as it is now.
-function loadNewBuildWhenFree() {
+// or undone, or reopened and not touched since, with the level saved as it is now. That last one
+// first asks the live page again (a phone just back is often offline, and a reload that fails leaves
+// the level on an error page) and goes only if it still answers with the new version, untouched.
+const untouched = () => (state === 'play' || state === 'jam') && reopenedAt > touchedAt;
+async function loadNewBuildWhenFree() {
   if (!newBuild || state === 'gone') return;
   if (state === 'done') reloadAt(0);
   else if (state === 'play' && !att.sends.length && !att.undos) reloadAt(current);
-  else if ((state === 'play' || state === 'jam') && reopenedAt > touchedAt && keptAsItIs()) reloadAt(current);
-}
-// Saves the level being played and reads it back: true only when storage holds it exactly as it is.
-function keptAsItIs() {
-  const text = JSON.stringify({ fp: printOf(current), ...att.save() });
-  return store.set(ATTEMPT_KEY(current), text) && store.get(ATTEMPT_KEY(current)) === text;
+  else if (untouched() && (await liveBuild().catch(() => '')) === newBuild && untouched()) { saveAttempt(); reloadAt(current); }
 }
 // The page is left for the new version: from here on nothing plays and nothing is saved, so a
-// restart that has just forgotten its attempt is not saved again as the page goes.
+// restart that has just forgotten its attempt is not saved again as the page goes. Not while
+// storage (blocked or full) does not hold a level left half-played this visit exactly as it was
+// left: the reload would lose it, so the new version waits (false).
 function reloadAt(n) {
+  if (![...kept].every(([k, a]) => store.get(ATTEMPT_KEY(k)) === attemptText(k, a))) return false;
   state = 'gone';
   store.set(SAVE_KEY, n);
   store.set(UPDATE_KEY, `${newBuild}@${Date.now()}`);
@@ -1016,6 +1045,7 @@ function reloadAt(n) {
   u.searchParams.delete('level'); // the saved level decides, so a page iOS stops later comes back right
   if (store.get(SAVE_KEY) !== String(n)) u.searchParams.set('level', n + 1); // storage blocked
   location.replace(u.href);
+  return true;
 }
 document.addEventListener('visibilitychange', () => {
   if (document.visibilityState === 'visible') {

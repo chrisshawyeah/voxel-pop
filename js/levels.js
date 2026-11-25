@@ -8,7 +8,7 @@ import { makeBoard, cloneBoard, removeCube, revealLone, START_SLOTS, RULES, FLIG
 //   name    what the level is called on screen
 //   model   which sculpture from js/models.js
 //   cols    how many lines of crew wait at the bottom (2 to 5 fit a phone)
-//   pads    how many launch pads (3 to 5 fit a phone). Fewer pads is much harder.
+//   pads    how many launch pads (2 to 5 fit a phone). Fewer pads is much harder.
 //   crew    [smallest, largest] number one crew member carries. Each colour is split into crew
 //           of round sizes (steps of ten) in that range; the last of a colour takes what is left,
 //           so the numbers add up to the cubes exactly. Bigger crew means fewer sends, and more
@@ -21,8 +21,10 @@ import { makeBoard, cloneBoard, removeCube, revealLone, START_SLOTS, RULES, FLIG
 //   greedy  [lowest, highest] share of plays, in %, that a player who sends any crew that can
 //           shoot right now should win. The tests check it (tools/players.mjs).
 //   follow  [lowest, highest] share of plays, in %, that a player who sends whatever the forecast
-//           says finishes, and never undoes, should win: the curve. Levels 1 to 3 teach (95-100),
-//           4 to 8 rise gently (within 75-90), 9 to 13 are the middle (within 41-83), 14 to 20 are
+//           says finishes, and never undoes, should win: the curve. Levels 1 to 3 teach (95-100);
+//           4 to 8 bring the first planned traps, which the follower sees coming (92-100), though
+//           the greedy player falls from 81-99 on level 4 to about 40-60 on 7 and 8; 9 to 13 are
+//           the middle (within 41-83), 14 to 20 are
 //           hard (within 19-61), each band a little lower than the one before, and the lantern is
 //           the one breather (95-100). From one level to the next the follower may win at most 20 points
 //           more, unless the band itself sits above the one before it (the breather).
@@ -31,7 +33,7 @@ import { makeBoard, cloneBoard, removeCube, revealLone, START_SLOTS, RULES, FLIG
 //           and falls by at most 1 (the breather is left out). tools/players.mjs curveMisses checks
 //           all of it.
 //   opening 'park' (optional): most players park a crew member on a pad in their first three sends
-//           and have to free it (tools/players.mjs earlyParks). Levels 2 and 3 teach parking this way.
+//           and have to free it (tools/players.mjs earlyParks). Level 2, the snail, teaches parking this way.
 //   deal    which deal of these settings is played. Picked by `node tools/pick-deals.mjs`, which
 //           tries deals until a careful player wins and the greedy, follow and undos measures
 //           land where the line says.
@@ -215,14 +217,15 @@ export function dealLevel(def) {
   return { def, model, board, shooters: crew.length, hidden };
 }
 
-// A short fingerprint of a level as dealt: its settings, its sculpture (size and cubes), its crew
-// and lines, its pads and the rules' version. A saved attempt carries it (js/main.js), so a save made before
-// any of those changed is turned down instead of replayed onto a different puzzle.
+// A short fingerprint of a level as dealt: what decides play, that is its sculpture (size, cubes
+// and colours), its crew in their lines, its pads and the rules' version. A saved attempt carries it
+// (js/main.js), so a save made before any of those changed is turned down instead of replayed onto a
+// different puzzle; a new name or test band leaves it as it was.
 const prints = new Map();
 export function levelPrint(n) {
   const L = buildLevel(n);
   if (!prints.has(L.def)) {
-    const text = JSON.stringify([RULES, FLIGHT, L.def, [L.model.sx, L.model.sy, L.model.sz], Array.from(L.model.cells).join(''), L.model.palette,
+    const text = JSON.stringify([RULES, FLIGHT, [L.model.sx, L.model.sy, L.model.sz], Array.from(L.model.cells).join(''), L.model.palette,
       L.board.columns.map(col => col.map(s => [s.color, s.count, s.hidden ? 1 : 0])), L.board.slots.length]);
     let a = 0x811c9dc5, b = 0x9e3779b9;
     for (let i = 0; i < text.length; i++) {

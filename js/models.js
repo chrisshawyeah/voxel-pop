@@ -862,8 +862,10 @@ function mug() {
 }
 
 
-// A treasure chest: thick brown walls with iron bands, its lid open behind it with a red lining,
-// a heap of gold inside with gems on it. Inside the walls teal, inside the gold red and green.
+// A treasure chest: thick brown walls with iron bands, its lid standing open at the front (+z, the
+// side the camera starts on) with its red lining toward the gold, a heap of gold inside with gems on
+// it. Inside the walls teal, inside the gold red and green. (With the lid behind, level 7's winning
+// line takes 90 s to fire, far past the 30 s allowed.)
 function chest() {
   const s = new Sculpt(19, 18, 14), X0 = 2, X1 = 16, Z0 = 2, Z1 = 10;
   box(s, X0, X1, 0, 7, Z0, Z1, 'brown');
