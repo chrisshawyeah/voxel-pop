@@ -8,7 +8,7 @@ import { makeBoard, cloneBoard, removeCube, revealLone, START_SLOTS, RULES, FLIG
 //   name    what the level is called on screen
 //   model   which sculpture from js/models.js
 //   cols    how many lines of crew wait at the bottom (2 to 5 fit a phone)
-//   pads    how many launch pads (3 to 5 fit a phone). Fewer pads is much harder.
+//   pads    how many launch pads (2 to 5 fit a phone). Fewer pads is much harder.
 //   crew    [smallest, largest] number one crew member carries. Each colour is split into crew
 //           of round sizes (steps of ten) in that range; the last of a colour takes what is left,
 //           so the numbers add up to the cubes exactly. Bigger crew means fewer sends, and more
@@ -21,8 +21,10 @@ import { makeBoard, cloneBoard, removeCube, revealLone, START_SLOTS, RULES, FLIG
 //   greedy  [lowest, highest] share of plays, in %, that a player who sends any crew that can
 //           shoot right now should win. The tests check it (tools/players.mjs).
 //   follow  [lowest, highest] share of plays, in %, that a player who sends whatever the forecast
-//           says finishes, and never undoes, should win: the curve. Levels 1 to 3 teach (95-100),
-//           4 to 8 rise gently (within 75-90), 9 to 13 are the middle (within 41-83), 14 to 20 are
+//           says finishes, and never undoes, should win: the curve. Levels 1 to 3 teach (95-100);
+//           4 to 8 bring the first planned traps, which the follower sees coming (92-100), though
+//           the greedy player falls from 81-99 on level 4 to about 40-60 on 7 and 8; 9 to 13 are
+//           the middle (within 41-83), 14 to 20 are
 //           hard (within 19-61), each band a little lower than the one before, and the lantern is
 //           the one breather (95-100). From one level to the next the follower may win at most 20 points
 //           more, unless the band itself sits above the one before it (the breather).
@@ -31,7 +33,7 @@ import { makeBoard, cloneBoard, removeCube, revealLone, START_SLOTS, RULES, FLIG
 //           and falls by at most 1 (the breather is left out). tools/players.mjs curveMisses checks
 //           all of it.
 //   opening 'park' (optional): most players park a crew member on a pad in their first three sends
-//           and have to free it (tools/players.mjs earlyParks). Levels 2 and 3 teach parking this way.
+//           and have to free it (tools/players.mjs earlyParks). Level 2, the snail, teaches parking this way.
 //   deal    which deal of these settings is played. Picked by `node tools/pick-deals.mjs`, which
 //           tries deals until a careful player wins and the greedy, follow and undos measures
 //           land where the line says.
@@ -44,14 +46,14 @@ import { makeBoard, cloneBoard, removeCube, revealLone, START_SLOTS, RULES, FLIG
 //           the solution, sending line j instead loses, though its front crew member could shoot
 //           right away. The tests prove every one (tools/traps.mjs finds and checks them).
 export const LEVELS = [
-  { name: 'Toadstool', model: 'mushroom', cols: 3, pads: 5, crew: [40, 60], hidden: 0, mix: 0, flip: 0, greedy: [95, 100], follow: [95, 100], undos: 0, deal: 0 },
-  { name: 'Bath Duck', model: 'duck', cols: 4, pads: 3, crew: [50, 80], hidden: 0, mix: 0.1, flip: 0.5, greedy: [85, 95], follow: [95, 100], undos: 0, opening: 'park', deal: 12 },
-  { name: 'Penguin', model: 'penguin', cols: 3, pads: 3, crew: [60, 90], hidden: 0, mix: 0.1, flip: 0.4, greedy: [85, 95], follow: [95, 100], undos: 0, opening: 'park', deal: 16 },
-  { name: 'Hot-Air Balloon', model: 'balloon', cols: 4, pads: 5, crew: [50, 80], hidden: 0, mix: 0.2, flip: 0.6, greedy: [70, 90], follow: [80, 90], undos: 1, deal: 6 },
-  { name: 'Robot', model: 'robot', cols: 5, pads: 5, crew: [50, 70], hidden: 0, mix: 0, flip: 0.6, greedy: [70, 90], follow: [79, 89], undos: 1, deal: 1 },
-  { name: 'Fish', model: 'fish', cols: 4, pads: 4, crew: [20, 40], hidden: 1, mix: 0.3, flip: 0.6, greedy: [70, 90], follow: [78, 88], undos: 1, deal: 22 },
-  { name: 'Cactus', model: 'cactus', cols: 4, pads: 4, crew: [30, 50], hidden: 1, mix: 0.1, flip: 0.6, greedy: [70, 90], follow: [76, 86], undos: 1, deal: 0 },
-  { name: 'Burger', model: 'burger', cols: 4, pads: 5, crew: [50, 80], hidden: 1, mix: 0.2, flip: 0.6, greedy: [70, 90], follow: [75, 85], undos: 1, deal: 4 },
+  { name: 'Doughnut', model: 'donut', cols: 3, pads: 5, crew: [40, 60], hidden: 0, mix: 0, flip: 0, greedy: [95, 100], follow: [95, 100], undos: 0, deal: 0 },
+  { name: 'Snail', model: 'snail', cols: 4, pads: 3, crew: [50, 80], hidden: 0, mix: 0.1, flip: 0.5, greedy: [85, 95], follow: [95, 100], undos: 0, opening: 'park', deal: 27 },
+  { name: 'Cocoa Mug', model: 'mug', cols: 3, pads: 2, crew: [60, 100], hidden: 0, mix: 0.1, flip: 0.8, greedy: [80, 95], follow: [95, 100], undos: 0, deal: 8 },
+  { name: 'Beehive', model: 'beehive', pads: 3, hidden: 0, lines: ['brown 100, yellow 70, brown 60, yellow 80, grey 9', 'brown 63, charcoal 77, charcoal 70, yellow 80, charcoal 100, charcoal 100, yellow 70, white 6', 'yellow 64, yellow 100, brown 90'], solution: [0, 0, 2, 2, 0, 0, 0, 1, 1, 1, 1, 1, 1, 2, 1, 1], traps: [[7, 2], [8, 2]], greedy: [81, 99], follow: [92, 100], undos: 1 },
+  { name: 'Ferris Wheel', model: 'ferris', pads: 3, hidden: 0, lines: ['red 40, teal 40, teal 50, teal 61, red 40, orange 50, grey 60, orange 60', 'red 40, blue 60, grey 54, grey 60, yellow 70, yellow 60', 'white 64, blue 60, white 70'], solution: [2,  2,  0,  0,  0,  1,  0,  1,  1,  2,  1,  1,  1,  0,  0,  0,  0], traps: [[7,  2],  [8,  0],  [8,  2],  [9,  0]], greedy: [64, 84], follow: [92, 100], undos: 1 },
+  { name: 'Carousel', model: 'carousel', pads: 3, hidden: 0, lines: ['orange 15, white 80, yellow 57, teal 100, white 110, white 80, teal 70, teal 80', 'white 129, red 110, blue 90, blue 70', 'blue 70, blue 80, blue 71, red 96, teal 70, teal 90, teal 70, white 70'], solution: [1,  1,  1,  1,  2,  0,  0,  0,  0,  0,  0,  2,  2,  2,  0,  0,  2,  2,  2,  2], traps: [[5, 2]], greedy: [59, 79], follow: [92, 100], undos: 1 },
+  { name: 'Treasure Chest', model: 'chest', pads: 3, hidden: 0, lines: ['green 90, teal 70, brown 110, brown 100', 'green 70, red 78, red 70, yellow 54', 'teal 78, teal 90, charcoal 70, brown 79, charcoal 80', 'green 99, charcoal 73, brown 90, brown 90'], solution: [0,  0,  0,  0,  2,  3,  3,  2,  3,  3,  1,  1,  1,  2,  2,  2,  1], traps: [[1,  2]], greedy: [40, 60], follow: [92, 100], undos: 1 },
+  { name: 'Globe', model: 'globe', pads: 3, hidden: 0, lines: ['yellow 70, yellow 100, grey 2, green 70, brown 100', 'brown 109, brown 90, blue 100, blue 70, white 16', 'yellow 64, green 70, green 112, blue 92, green 100'], solution: [1,  0,  0,  0,  0,  0,  1,  1,  1,  2,  2,  2,  2,  2,  1], traps: [[2,  1],  [3,  1],  [4,  1]], greedy: [41, 61], follow: [92, 100], undos: 1 },
   { name: 'Treehouse', model: 'treehouse', pads: 3, hidden: 2, lines: ['orange 96, teal 96, grey 152, grey 100', 'lilac 70, ?orange 100, orange 110, ?yellow 4', 'charcoal 83, red 110, green 96, green 110', 'teal 110, red 113, brown 165, green 100'], solution: [0, 0, 0, 0, 2, 2, 2, 2, 3, 3, 3, 3, 1, 1, 1, 1], traps: [[6, 3]], greedy: [45, 65], follow: [67, 83], undos: 3 },
   { name: 'Teapot', model: 'teapot', pads: 3, hidden: 2, lines: ['brown 40, blue 40, teal 40, teal 60, blue 50, blue 40, blue 60', 'orange 41, blue 51, teal 30, teal 34, ?blue 60, blue 40, yellow 5', 'brown 51, ?blue 40, teal 30, teal 30, white 55, blue 40'], solution: [0, 0, 1, 1, 0, 0, 0, 2, 0, 0, 2, 1, 1, 1, 1, 2, 2, 2, 2, 1], traps: [[2, 0], [3, 0]], greedy: [55, 80], follow: [60, 76], undos: 3 },
   { name: 'Birdcage', model: 'birdcage', pads: 3, hidden: 0, lines: ['blue 139, teal 90, brown 100, yellow 120, white 29, brown 74', 'blue 110, red 40, teal 74, orange 4, charcoal 11, blue 110', 'teal 80, teal 90, brown 80, yellow 80, yellow 100, yellow 80', 'green 3, teal 90, brown 110, yellow 80, brown 110, yellow 80'], solution: [0, 0, 0, 0, 1, 2, 2, 2, 2, 2, 2, 1, 1, 0, 0, 1, 1, 1, 3, 3, 3, 3, 3, 3], traps: [[1, 2]], greedy: [10, 35], follow: [55, 71], undos: 3 },
@@ -215,25 +217,34 @@ export function dealLevel(def) {
   return { def, model, board, shooters: crew.length, hidden };
 }
 
-// A short fingerprint of a level as dealt: its settings, its sculpture (size and cubes), its crew
-// and lines, its pads and the rules' version. A saved attempt carries it (js/main.js), so a save made before
-// any of those changed is turned down instead of replayed onto a different puzzle.
+// Two short fingerprints of a level as dealt. levelShape is its puzzle: its sculpture (size and
+// cubes, cell by cell), its crew in their lines and its pads. A player's stars and marks are kept
+// against it (js/main.js), so new rules or a new shade of a colour keep them, and a new sculpture
+// or new crew under the level's number do not. levelPrint adds the rules' version: a saved attempt
+// carries it (js/main.js), so a save made before any of those changed is turned down instead of
+// replayed onto a different puzzle. A new name, test band or shade of a colour (which only decides
+// drawing) leaves both as they were.
 const prints = new Map();
-export function levelPrint(n) {
+const hash = text => {
+  let a = 0x811c9dc5, b = 0x9e3779b9;
+  for (let i = 0; i < text.length; i++) {
+    const c = text.charCodeAt(i);
+    a = Math.imul(a ^ c, 16777619);
+    b = Math.imul(b ^ c, 2246822519) ^ (b >>> 13);
+  }
+  return `${(a >>> 0).toString(36)}.${(b >>> 0).toString(36)}.${text.length}`;
+};
+function fingerprints(n) {
   const L = buildLevel(n);
   if (!prints.has(L.def)) {
-    const text = JSON.stringify([RULES, FLIGHT, L.def, [L.model.sx, L.model.sy, L.model.sz], Array.from(L.model.cells).join(''), L.model.palette,
-      L.board.columns.map(col => col.map(s => [s.color, s.count, s.hidden ? 1 : 0])), L.board.slots.length]);
-    let a = 0x811c9dc5, b = 0x9e3779b9;
-    for (let i = 0; i < text.length; i++) {
-      const c = text.charCodeAt(i);
-      a = Math.imul(a ^ c, 16777619);
-      b = Math.imul(b ^ c, 2246822519) ^ (b >>> 13);
-    }
-    prints.set(L.def, `${(a >>> 0).toString(36)}.${(b >>> 0).toString(36)}.${text.length}`);
+    const shape = [[L.model.sx, L.model.sy, L.model.sz], Array.from(L.model.cells).join(''),
+      L.board.columns.map(col => col.map(s => [s.color, s.count, s.hidden ? 1 : 0])), L.board.slots.length];
+    prints.set(L.def, { shape: hash(JSON.stringify(shape)), play: hash(JSON.stringify([RULES, FLIGHT, ...shape])) });
   }
   return prints.get(L.def);
 }
+export const levelShape = n => fingerprints(n).shape;
+export const levelPrint = n => fingerprints(n).play;
 
 // The level as played. Built once per level line and kept, so a restart, the arrows and the
 // tap after running out of room hand out a fresh copy instead of dealing it again.

@@ -813,8 +813,173 @@ function submarine() {
   return s.done();
 }
 
+// ---------- Levels 1 to 8 (Chris, November 25th: a better game on his phone) ----------
+// Smaller floating sculptures that teach the same ideas as the big ones after them: a hole to see
+// through, a rim that hides a hollow, an underside only seen from below, a lid and a cage.
+
+// A doughnut: a ring of dough with pink icing on top and sprinkles; the hole shows through.
+function donut() {
+  const s = new Sculpt(15, 7, 15), C = 7, R = 4.3, r = 2.1, Y = 3;
+  s.fill((x, y, z) => sq(Math.hypot(x - C, z - C) - R) + sq(y - Y) <= sq(r), 'tan');
+  s.paint((x, y, z) => y >= Y + (Math.sin(Math.atan2(z - C, x - C) * 6) > 0.4 ? 0 : 1), 'pink');
+  s.speckle((x, y, z, cur) => cur === 'pink' && y >= Y + 1 && s.skin(x, y, z), ['yellow', 'teal', 'white'], 0.35, 3);
+  return s.done();
+}
+
+// A snail: a long green body with eye stalks and a coiled shell on its back. Inside the shell, green
+// (the body's colour), then charcoal (the eyes'): their crew look ready, but most of their cubes are
+// sealed in the shell.
+function snail() {
+  const s = new Sculpt(20, 15, 11), M = 5, SX = 8, SY = 7.5;
+  path(s, [[1.5, 1.4, M], [8, 1.5, M], [13, 1.8, M], [15.5, 3.5, M], [16.5, 5.5, M]], 1.6, 'green');
+  for (const side of [-1, 1]) {
+    rod(s, [16.5, 6, M + side * 0.8], [17.6, 9.6, M + side * 1.9], 0.7, 'green');
+    s.set(17.6, 10.2, M + side * 1.9, 'charcoal');
+  }
+  ball(s, SX, SY, M, 5.6, 5.6, 3.6, 'orange');
+  // A groove along the coil makes the shell a spiral, and the coil's stripe is brown.
+  const coil = (x, y) => { const d = Math.hypot(x - SX, y - SY), a = Math.atan2(y - SY, x - SX); return ((d + (a / (2 * Math.PI)) * 2.4) % 2.4 + 2.4) % 2.4; };
+  s.paint((x, y, z, cur) => cur === 'orange' && coil(x, y) < 0.8, 'brown');
+  s.fill((x, y, z) => s.get(x, y, z) === 'brown' && Math.abs(z - M) >= 3, null);
+  s.bands(['green', 'charcoal'], (x, y, z, cur) => cur === 'orange' || cur === 'brown');
+  return s.done();
+}
+
+// A mug of cocoa: a hollow blue mug with a yellow stripe and a handle, cocoa inside with
+// marshmallows on top. The cocoa shows only from above, three cubes deep; under it caramel, yellow
+// like the stripe, and white (the marshmallows' colour) sealed in the mug's thick base.
+function mug() {
+  const s = new Sculpt(17, 12, 13), C = 6, Z = 6, R = 5;
+  s.fill((x, y, z) => y <= 10 && Math.hypot(x - C, z - Z) <= R + 0.4, 'blue');
+  s.fill((x, y, z) => y >= 2 && Math.hypot(x - C, z - Z) <= R - 1.1, null);
+  s.fill((x, y, z) => y >= 2 && y <= 7 && Math.hypot(x - C, z - Z) <= R - 1.1, 'brown');
+  s.fill((x, y, z) => y >= 2 && y <= 4 && Math.hypot(x - C, z - Z) <= R - 1.1, 'yellow'); // caramel under three layers of cocoa
+  for (const [mx, mz] of [[C - 1.5, Z - 1], [C + 1.5, Z + 1.5], [C + 1, Z - 2], [C - 2, Z + 2]]) box(s, Math.round(mx), Math.round(mx) + 1, 8, 8, Math.round(mz), Math.round(mz) + 1, 'white');
+  s.paint((x, y, z, cur) => cur === 'blue' && (y === 5 || y === 6) && Math.hypot(x - C, z - Z) > R - 0.8, 'yellow');
+  hoop(s, C + R + 1.4, 5.5, Z, 'z', 2.6, 0.8, 'blue', x => x >= C + R);
+  s.bands(['white'], (x, y, z, cur) => cur === 'blue' && y <= 1);
+  return s.done();
+}
+
+
+// A treasure chest: thick brown walls with iron bands, its lid standing open at the front (+z, the
+// side the camera starts on) with its red lining toward the gold, a heap of gold inside with gems on
+// it. Inside the walls teal, inside the gold red and green. (With the lid behind, level 7's winning
+// line takes 90 s to fire, far past the 30 s allowed.)
+function chest() {
+  const s = new Sculpt(19, 18, 14), X0 = 2, X1 = 16, Z0 = 2, Z1 = 10;
+  box(s, X0, X1, 0, 7, Z0, Z1, 'brown');
+  box(s, X0 + 2, X1 - 2, 2, 7, Z0 + 2, Z1 - 2, null);
+  box(s, X0 + 2, X1 - 2, 2, 6, Z0 + 2, Z1 - 2, 'yellow');
+  ball(s, 9, 6.5, 6, 5.2, 3, 2.8, 'yellow', (x, y, z) => y >= 7);
+  box(s, X0, X1, 8, 16, Z1 + 1, Z1 + 2, 'brown'); // the lid, open
+  s.paint((x, y, z, cur) => cur === 'brown' && z === Z1 + 1 && x > X0 && x < X1 && y > 8 && y < 16, 'red');
+  s.paint((x, y, z, cur) => cur === 'brown' && (x === X0 + 2 || x === X1 - 2 || y === 0), 'charcoal');
+  for (const [gx, gy, gz, g] of [[7, 9, 5, 'red'], [10, 9, 7, 'green'], [12, 8, 5, 'red'], [6, 8, 7, 'green'], [9, 10, 6, 'teal']]) s.set(gx, gy, gz, g);
+  s.bands(['teal'], (x, y, z, cur) => cur === 'brown');
+  s.bands(['red', 'green'], (x, y, z, cur) => cur === 'yellow');
+  return s.done();
+}
+
+// A globe: blue sea and green land with white poles, on a tilted axle in a brass half-ring, on
+// a stand. Inside the sea, green (the land's colour), then yellow (the ring's), then brown (the
+// stand's): their crew look ready, but most of their cubes are sealed in the globe.
+function globe() {
+  const s = new Sculpt(17, 23, 17), C = 8, Y = 13, R = 6.2;
+  rod(s, [C, Y - R - 1.7, C], [C, Y + R + 1.7, C], 0.55, 'grey');
+  ball(s, C, Y, C, R, R, R, 'blue');
+  s.paint((x, y, z, cur) => cur === 'blue' && Math.sin(1.3 * x) + Math.sin(1.1 * y + 0.5 * z) + Math.cos(0.9 * z - 0.7 * x) > 0.8, 'green');
+  s.paint((x, y, z, cur) => (cur === 'blue' || cur === 'green') && Math.abs(y - Y) >= R - 0.7, 'white');
+  hoop(s, C, Y, C, 'z', R + 1.7, 0.6, 'yellow', x => x <= C);
+  rod(s, [C, Y - R - 1.7, C], [C, 2, C], 0.9, 'brown');
+  s.fill((x, y, z) => y <= 1 && Math.hypot(x - C, z - C) <= 4.2, 'brown');
+  s.bands(['green', 'yellow', 'brown'], (x, y, z, cur) => cur === 'blue' || cur === 'green' || cur === 'white');
+  return s.done();
+}
+
+// A carousel: a teal floor with a white rim, a blue drum in the middle, six yellow poles with
+// white horses on orange saddles, and a striped red and white roof whose underside shows only
+// from below.
+function carousel() {
+  const s = new Sculpt(21, 21, 21), C = 10;
+  s.fill((x, y, z) => y <= 2 && Math.hypot(x - C, z - C) <= 9.2, 'teal');
+  s.paint((x, y, z, cur) => cur === 'teal' && Math.hypot(x - C, z - C) > 8.2, 'white');
+  s.fill((x, y, z) => y >= 3 && y <= 13 && Math.hypot(x - C, z - C) <= 2.6, 'blue');
+  const roof = (x, y, z) => { const r = Math.hypot(x - C, z - C), R = 9.6 - (y - 13) * 1.75; return y >= 13 && y <= 18 && r <= R && r >= R - 2.6; };
+  s.fill(roof, 'red');
+  s.paint((x, y, z, cur) => cur === 'red' && Math.floor((Math.atan2(z - C, x - C) + Math.PI) / (Math.PI / 6)) % 2 === 1, 'white');
+  s.fill((x, y, z) => y === 19 && Math.hypot(x - C, z - C) <= 1.2, 'yellow');
+  for (let k = 0; k < 6; k++) {
+    const a = (k * Math.PI) / 3, px = C + 6.3 * Math.cos(a), pz = C + 6.3 * Math.sin(a);
+    rod(s, [px, 3, pz], [px, 13, pz], 0.5, 'yellow');
+    const tx = -Math.sin(a), tz = Math.cos(a), hy = 6 + (k % 2) * 2; // horses face round the ring, up and down in turn
+    rod(s, [px - tx * 1.6, hy, pz - tz * 1.6], [px + tx * 1.6, hy, pz + tz * 1.6], 1.05, 'white');
+    rod(s, [px + tx * 1.6, hy, pz + tz * 1.6], [px + tx * 2.4, hy + 1.8, pz + tz * 2.4], 0.7, 'white');
+    for (const lg of [-1.2, 1.2]) rod(s, [px + tx * lg, hy, pz + tz * lg], [px + tx * lg, hy - 2, pz + tz * lg], 0.4, 'white');
+    s.set(px, hy + 1, pz, 'orange');
+  }
+  // Each roof stripe hides the other stripe's colour; the floor hides blue (the drum's colour),
+  // and the drum teal (the floor's), then orange (the saddles').
+  const stripe = (x, z) => Math.floor((Math.atan2(z - C, x - C) + Math.PI) / (Math.PI / 6)) % 2 === 1 ? 'white' : 'red';
+  s.paint((x, y, z, cur) => roof(x, y, z) && s.depth(x, y, z) >= 1, (x, y, z) => (stripe(x, z) === 'red' ? 'white' : 'red'));
+  s.bands(['blue'], (x, y, z, cur) => y <= 2 && (cur === 'teal' || cur === 'white'));
+  s.bands(['teal', 'orange'], (x, y, z, cur) => cur === 'blue' && y >= 3);
+  return s.done();
+}
+
+// A Ferris wheel: two teal rims joined by white spokes round a grey hub, eight cabins hanging
+// from the rims, on grey A-frame legs. The hub hides white (the spokes' colour), then teal (the rims').
+function ferris() {
+  const s = new Sculpt(25, 25, 11), C = 12, Y = 13, Z = 5, R = 8.6;
+  for (const dz of [-2, 2]) {
+    hoop(s, C, Y, Z + dz, 'z', R, 0.7, 'teal');
+    for (let k = 0; k < 8; k++) { const a = (k * Math.PI) / 4; rod(s, [C, Y, Z + dz], [C + R * Math.cos(a), Y + R * Math.sin(a), Z + dz], 0.45, 'white'); }
+    rod(s, [C, Y, Z + dz * 1.5], [C - 7, 0.5, Z + dz * 1.5], 0.6, 'grey');
+    rod(s, [C, Y, Z + dz * 1.5], [C + 7, 0.5, Z + dz * 1.5], 0.6, 'grey');
+  }
+  rod(s, [C - 7, 0.5, Z - 3], [C - 7, 0.5, Z + 3], 0.6, 'grey');
+  rod(s, [C + 7, 0.5, Z - 3], [C + 7, 0.5, Z + 3], 0.6, 'grey');
+  rod(s, [C, Y, Z - 3.2], [C, Y, Z + 3.2], 2.2, 'grey');
+  // Each cabin is packed with the next cabin's colour, so a crew of that colour looks ready (its
+  // own cabin shows) but part of its cubes wait inside another cabin.
+  const cabin = ['red', 'yellow', 'blue', 'orange'];
+  for (let k = 0; k < 8; k++) {
+    const a = (k * Math.PI) / 4 + Math.PI / 8, cx = Math.round(C + R * Math.cos(a)), cy = Math.round(Y + R * Math.sin(a));
+    box(s, cx - 2, cx + 2, cy - 5, cy - 2, Z - 1, Z + 1, cabin[k % 4]);
+    s.set(cx, cy - 1, Z, 'grey');
+    s.bands([cabin[(k + 1) % 4]], (x, y, z) => x >= cx - 2 && x <= cx + 2 && y >= cy - 5 && y <= cy - 2 && Math.abs(z - Z) <= 1);
+  }
+  s.bands(['white', 'teal'], (x, y, z, cur) => cur === 'grey' && Math.abs(x - C) <= 1.5 && Math.abs(y - Y) <= 1.5);
+  return s.done();
+}
+
+
+// A beehive: a domed skep of yellow coils with brown bands and a dark entrance, three bees on wires
+// flying round it. Inside the coils, charcoal (the bees' stripes and the entrance), then brown (the
+// bands'), then yellow again: crew of those colours look ready, but most of their cubes are sealed.
+function beehive() {
+  const s = new Sculpt(19, 16, 19), C = 9;
+  const R = y => 6.1 * Math.sqrt(Math.max(0, 1 - Math.pow((y - 1.5) / 11.5, 2)));
+  s.fill((x, y, z) => y <= 12 && Math.hypot(x - C, z - C) <= R(y), 'yellow');
+  s.paint((x, y, z) => y % 3 === 2, 'brown');
+  s.fill((x, y, z) => y <= 3 && z >= C + 4 && Math.abs(x - C) <= 1.2, 'charcoal'); // the entrance, dark
+  s.fill((x, y, z) => y <= 3 && z >= C + 5 && Math.abs(x - C) <= 1.2, null);
+  s.fill((x, y, z) => y === 13 && Math.hypot(x - C, z - C) <= 1.2, 'brown');
+  const bees = [[C + 7.5, 7, C + 2.5, 0.4], [C - 7.5, 9, C - 2, 2.6], [C + 2, 11, C - 7.5, 4.3]];
+  for (const [bx, by, bz, a] of bees) {
+    const hx = C + 4.5 * Math.cos(a), hz = C + 4.5 * Math.sin(a);
+    rod(s, [hx, by - 2, hz], [bx, by, bz], 0.45, 'grey'); // the wire it flies on
+    ball(s, bx, by, bz, 1.5, 1.1, 1.1, 'yellow');
+    s.paint((x, y, z, cur) => cur === 'yellow' && Math.hypot(x - bx, y - by, z - bz) <= 1.8 && Math.abs(x - bx) < 0.6, 'charcoal');
+    s.set(bx, by + 1.6, bz - 1, 'white'); s.set(bx, by + 1.6, bz + 1, 'white'); // wings
+  }
+  s.bands(['charcoal', 'brown', 'yellow'], (x, y, z, cur) => (cur === 'yellow' || cur === 'brown') && Math.hypot(x - C, z - C) <= 6.3);
+  return s.done();
+}
+
 export const MODELS = {
   mushroom, duck, cactus, rocket, penguin, balloon, lighthouse, robot, planet, castle, dolls,
   cupcake, burger, fish, gift, tree, melon, snowman, house, patchwork,
   birdcage, lantern, jellyfish, airship, pagoda, teapot, atom, treehouse, hourglass, octopus, windmill, station, submarine,
+  donut, snail, mug, chest, globe, carousel, ferris, beehive,
 };

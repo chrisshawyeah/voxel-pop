@@ -1,7 +1,8 @@
 // Crumble Crew on the iPhone: the app is a full-screen window onto the game's web page, so
 // every change pushed to the game shows up with no new install. The page itself decides when a
-// new version loads (js/main.js, checkForUpdate): only at a level boundary, never in the middle
-// of a level, and only once every file of it has come through. Coming back to the front, the app
+// new version loads (js/main.js, checkForUpdate), only once every file of it has come through: at a
+// level boundary, or, back after a minute or more away, before the first touch even in the middle
+// of a level, which comes back as it was left. Coming back to the front, the app
 // asks the page to check (before the page has loaded the ask is dropped, and the page checks by
 // itself as it loads). When iOS has stopped the page's process in the background, the app loads
 // it again and the page puts the level back as it was when it was hidden, from what it saved then.

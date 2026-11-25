@@ -19,7 +19,7 @@ none of them can hit anything, you are out of room: a tap takes back your last s
 tap the one before, back to the start of the level if need be.
 
 Undo is unlimited, but a level won with no undo at all is a *clean clear*: the win says
-"Toadstool popped! Clean clear", and the level keeps one small star beside its name in the top
+"Doughnut popped! Clean clear", and the level keeps one small star beside its name in the top
 bar. Undos are counted for the attempt (a restart of the level starts the count again); taking
 back a send never lowers the count, and it survives a reload.
 
@@ -99,18 +99,31 @@ Play: https://chrisshawyeah.github.io/voxel-pop/
   left with a check of the board then. It is saved after every send and undo, when the page is
   hidden or closed, and when you move to another level, so a page the phone stopped in the
   background comes back exactly as it was, undo and all. A save from an older version of the level
-  (its settings, sculpture, deal or the rules changed: `levelPrint()` in `js/levels.js`, `RULES` in
-  `js/logic.js`) is turned down with "Level changed. Restarted.", and a broken one can never stop
-  the game: every field and tick is checked and bounded (`Attempt.restore()` in `js/logic.js`).
-  The single attempt very old versions kept carries no fingerprint, so its level starts again with
-  the same message.
-- A new version of the game loads only at a level boundary: a level with nothing sent or undone,
-  the start of another level, or the ending, and only once every one of its files has been
-  fetched whole; otherwise the old version plays on and it tries again later. The page checks as
+  (its sculpture, its crew, its pads or the rules changed, not just its name, test bands or the
+  shades of its colours: `levelPrint()` in `js/levels.js`, `RULES` in `js/logic.js`) is turned
+  down with "Level changed. Restarted.", and a broken one can never stop the game: every field and
+  tick is checked and bounded (`Attempt.restore()` in `js/logic.js`). This version works the
+  fingerprint out differently, so a level left half-played in an earlier version starts again
+  once, with the same message. The single attempt very old versions kept
+  carries no fingerprint, so its level starts again with the same message.
+- Unless the game was just reopened (next point), a new version loads only at a level boundary: a
+  level with nothing sent or undone, the start of another level, or the ending, and only once every
+  one of its files has been fetched whole; otherwise the old version plays on and it tries again
+  later. The page checks as
   it loads, when it comes back into view, and when the iPhone app comes back to the front
   (`checkForUpdate()` in `js/main.js`). A reload that comes back as the old version (a stale
   cache) is tried again after a minute, never in a loop. Restarting a level just as a new version
   loads restarts it in the new version too.
+- Reopened, it loads at once, even in the middle of a level: when the page has just loaded, or
+  comes back after a minute or more away (hidden that long, or its frames stopped that long while
+  iOS held the app), the new version loads before the first touch. The level is saved as it is
+  first and comes back as it was left, or starts again when the new version changed it. While a
+  level left half-played this visit lives only in memory (storage blocked or full), no reload
+  happens, at a level boundary or otherwise, until that level is won or restarted (`reloadAt()`
+  in `js/main.js`). A touch
+  before the new version is ready means it waits for a level boundary as above
+  (`reopened()` and `loadNewBuildWhenFree()` in `js/main.js`; `tools/reopen-check.mjs` proves it
+  in a browser).
 - `?level=7` at the end of the address opens level 7 once; the address then forgets it, so a
   reload comes back to the level being played. A number that is not a whole level from 1 to 20 is
   rounded and kept inside that range; when the browser blocks storage the game plays on and the
@@ -139,7 +152,7 @@ No build step and nothing to install. Every file is plain JavaScript the browser
 | Undo, the undo count, and the attempt kept in storage | `Attempt` in `js/logic.js` (a copy of the board before each send; `save()` and `restore()`); `undo()`, `saveAttempt()`, `savedAttempt()` in `js/main.js`. Change `RULES` in `js/logic.js` when a rules change makes old saves wrong |
 | Ready and covered fronts, asleep crew, the forecast marks and words, press and hold, the progress bar | `showReach()`, `forecastFor()`, `frontEvents()`, `inspect()` and `progress()` in `js/main.js` (`HOLD_MS`; `marksShown()`: levels up to `TEACH_UNTIL` always, the rest until the first hold); the forecast itself, strands and all, is `forecast()` and `fates()` in `js/logic.js`; their look in `css/game.css` |
 | The line preview, the lessons, the star | `preview()`, `teach()` and `showStar()` in `js/main.js` |
-| When a new version loads | `checkForUpdate()` and `reloadAt()` in `js/main.js` (`FRESH` lists every file that must come through first) |
+| When a new version loads | `checkForUpdate()`, `loadNewBuildWhenFree()` and `reloadAt()` in `js/main.js` (`FRESH` lists every file that must come through first) |
 | The look of the crew, pads, top bar and short-window layout | `css/game.css` |
 | Sounds | `js/audio.js` (every sound is made in code). Ordinary pops are soft and at most about 9 a second (`POP_GAP`); the bright rising notes are for a crew member finishing, a colour cleared and a win. |
 | The 3D look: cubes, lights, camera framing, chips, puffs, the build at a level's start | `js/render.js` |
@@ -162,15 +175,19 @@ and the greedy player wins about as often as the level's `greedy` band says. Bes
 greedy* player, tapping whatever is ready every 150 ms (it may win at most 10 points more than
 the greedy one, and from level 2 on it must lose sometimes); a *forecast follower* that sends
 whatever the forecast says finishes and strands nobody, waiting for the pads to stop
-(`forecastFirst`) or tapping every 150 ms (`hastyForecast`); and the same follower with undo,
+(`forecastFirst`) or tapping every 150 ms (`hastyForecast`, printed only, and measured only with
+`HASTY_FOLLOWER=1 npm test`: on the big boards it takes most of an hour); and the same follower with undo,
 taking back its last send when out of room and never trying a lost board twice, at most 50 undos
-(`backtrack`). A level with `opening: 'park'` (levels 2 and 3) must have most greedy plays park
+(`backtrack`). A level with `opening: 'park'` (level 2, the snail) must have most greedy plays park
 someone in their first three sends. And a winning line, sent the moment a pad frees, must take at
 most 30 seconds to fire (`firingTime()`, on the game's clock).
 
 The curve is the forecast follower's win rate, level by level: each level's `follow` band in
 `js/levels.js`, and `undos`, the most undos the follower with undo may need in its median won play.
-Levels 1 to 3 teach (95 to 100%), 4 to 8 rise gently (within 75 to 90%), 9 to 13 are the middle
+Levels 1 to 3 teach (95 to 100%); 4 to 8 bring the first planned traps, which a player who reads
+the forecast always sees coming (92 to 100%), though one who sends whatever can shoot loses from
+about one play in ten on the beehive up to about one in two on the treasure chest and the globe;
+9 to 13 are the middle
 (the follower wins from three plays in four down to one in two, with no undo needed), 14 to 20 are
 hard (from one play in two down to about one in four, three to five undos), each band a little
 lower than the one before, and level 19, the lantern, is the one breather (95 to 100%) before the
@@ -185,15 +202,17 @@ depth once the follower wins less than half the time, which is why one level may
 Since a crew member can hit its colour from any side, a colour all on the outside never makes
 anyone wait; the waiting comes from colours hidden inside. So every sculpture past level 1 has
 inner layers (`bands()` in `js/models.js`): under its skin, more colours by depth, a new colour
-for each layer, which look the same from outside. Levels 2 and 3 open on purpose with parking and
-unlocking: the duck has foam over its back and more foam, an orange squeaker and a black weight
-under a layer of pink rubber; the penguin has its orange fish, more red and more white under a
-layer of blue ice. A crew member of those colours pops what shows and then waits on its pad for
-the rest, each level with three pads.
+for each layer, which look the same from outside. Levels 1 to 3 are small floating sculptures that
+teach: the doughnut, the snail and the cocoa mug. The snail opens on purpose with parking and
+unlocking: its shell is packed with more green (the body's colour) and charcoal (the eyes'), so a
+crew member of those colours pops what shows and then waits on its pad for the rest. The mug has
+only two pads; its cocoa shows only from above, three cubes deep, and seals in caramel as yellow as
+its stripe.
 
-Levels 9 to 20 are twelve floating sculptures with cages, windows and overhangs (the treehouse,
-teapot, birdcage, submarine, jellyfish, hourglass, space station, windmill, pagoda, airship,
-lantern and atom), and each is built around planned hard moments. Its crew are written out by
+Levels 4 to 20 are seventeen floating sculptures with cages, windows and overhangs (the beehive,
+Ferris wheel, carousel, treasure chest, globe, treehouse, teapot, birdcage, submarine, jellyfish,
+hourglass, space station, windmill, pagoda, airship, lantern and atom), and each is built around
+planned hard moments. Its crew are written out by
 hand (`lines` in `js/levels.js`), with a winning order of sends (`solution`) and its `traps`: one
 to three moments along that order where sending another line, whose front crew member looks ready
 because cubes of its colour show, loses, though the level is still won by the right send. The
@@ -203,9 +222,12 @@ inside, so its crew pop what shows and then wait on a pad. `node tools/traps.mjs
 every planned trap still loses (the tests run the same check), `node tools/traps.mjs find 14`
 lists the traps along level 14's solution, and `node tools/traps.mjs search <sculpture> --measure`
 deals a sculpture over and over and prints, as lines to copy in, each deal with one to three trap
-moments whose winning line holds and fires within 30 seconds, with its measures.
+moments whose winning line holds and fires within 30 seconds, with its measures. When no deal has
+a trap, `node tools/traps.mjs design <sculpture> --deal=N` starts from one and moves crew between
+and along the lines, keeping each change that leaves the level won and closer to a trap (the
+beehive's, Ferris wheel's and carousel's lines were made this way).
 
-After changing a dealt level's settings (levels 1 to 8), pick a deal for them, then check every level:
+After changing a dealt level's settings (levels 1 to 3), pick a deal for them, then check every level:
 
     node tools/pick-deals.mjs 12            # level 12: prints its new line to copy in
     node tools/pick-deals.mjs 12 --write    # ... and writes it into js/levels.js

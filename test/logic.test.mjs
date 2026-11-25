@@ -1,13 +1,16 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { readFileSync } from 'node:fs';
+import { readFileSync, writeFileSync, mkdtempSync, cpSync, rmSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import { spawnSync } from 'node:child_process';
-import { fileURLToPath } from 'node:url';
+import { fileURLToPath, pathToFileURL } from 'node:url';
 import { makeBoard, cloneBoard, removeCube, deploy, fire, step, settle, launch, target, isJammed, isWon, canFire, canReach, purgeCleared, isExposed, freeSlot, FLIGHT, tickGame, advance, forecast, forecastKey, fates, busy, revealLone, checkOf, pace, Attempt, FAST,
   setView, seen, camPos, lookAt, pitchUnits, pitchRad, YAW_STEPS, START_YAW, START_PITCH, PITCH_STEPS, TURN, SEEK, STALL } from '../js/logic.js';
 import { pixels } from '../tools/sight.mjs';
-import { checkTraps } from '../tools/traps.mjs';
-import { LEVELS, buildLevel, dealLevel, levelPrint, rng } from '../js/levels.js';
+import { checkTraps, findTraps } from '../tools/traps.mjs';
+import { LEVELS, buildLevel, dealLevel, levelPrint, levelShape, rng } from '../js/levels.js';
+import { MODELS } from '../js/models.js';
 import { plan, greedy, greedyCheck, hastyCheck, hastyGreedy, lineHolds, playLine, onClock, earlyParks, forecastFirst, backtrack, forecastCheck, hastyForecastCheck, backtrackCheck, firingTime, curveMisses, GAPS, LAND, GREEDY_PLAYS, PARK_MIN } from '../tools/players.mjs';
 
 const at = (m, x, y, z) => x + m.sx * (y + m.sy * z);
@@ -374,13 +377,15 @@ test('crew of a vanished colour leave', () => {
 });
 
 test('a level is dealt once and handed out fresh', () => {
-  const a = buildLevel(3), b = buildLevel(3);
+  const n = LEVELS.findIndex(d => !d.lines); // a level dealt from its settings
+  assert.ok(n >= 0, 'some level is dealt from its settings');
+  const a = buildLevel(n), b = buildLevel(n);
   assert.notEqual(a.board, b.board);
   assert.deepEqual(a.board.columns, b.board.columns);
   deploy(a.board, 0); settle(a.board);
-  assert.deepEqual(buildLevel(3).board.columns, b.board.columns, 'playing a copy leaves the kept level alone');
-  assert.equal(buildLevel(3).board.cleared, 0);
-  assert.deepEqual(dealLevel(LEVELS[3]).board.columns, b.board.columns, 'the stored deal is built directly from its settings');
+  assert.deepEqual(buildLevel(n).board.columns, b.board.columns, 'playing a copy leaves the kept level alone');
+  assert.equal(buildLevel(n).board.cleared, 0);
+  assert.deepEqual(dealLevel(LEVELS[n]).board.columns, b.board.columns, 'the stored deal is built directly from its settings');
 });
 
 test('the planning player treats a "?" as unknown until it reaches the front', () => {
@@ -432,8 +437,12 @@ function sendAndWatch(st, ci) {
   return mine;
 }
 
+// The robot, no longer a level since levels 1 to 8 were made again on November 25th: a big board with
+// five pads, dealt here for the tests that send many crew at once.
+const robotLevel = () => dealLevel({ name: 'Robot', model: 'robot', cols: 5, pads: 5, crew: [50, 70], hidden: 0, mix: 0, flip: 0.6, deal: 1 });
+
 test('undo takes back the last send: cubes, lines, pads, shots in the air and the clock', () => {
-  const L = buildLevel(7);
+  const L = robotLevel();
   const a = new Attempt(L.board);
   assert.equal(a.canUndo, false, 'nothing to undo at the start');
   const before = [];
@@ -457,7 +466,7 @@ test('undo takes back the last send: cubes, lines, pads, shots in the air and th
   }
   assert.equal(a.canUndo, false);
   assert.equal(a.undo(), false);
-  assert.deepEqual(a.board.columns, buildLevel(7).board.columns, 'back to the start of the level');
+  assert.deepEqual(a.board.columns, robotLevel().board.columns, 'back to the start of the level');
 });
 
 // The cubes that can be hit, worked out from scratch from the cubes left: every cube with a face on
@@ -471,8 +480,7 @@ function hittable(b) {
 const hitList = b => b.exposed.map(set => [...set].sort((x, y) => x - y));
 
 test('Robot: the legs and feet under its body can be hit from the start, and all of them in the end', () => {
-  const n = LEVELS.findIndex(d => d.model === 'robot');
-  const L = buildLevel(n);
+  const L = robotLevel();
   const m = L.model, st = L.board;
   const grey = m.names.indexOf('grey'), charcoal = m.names.indexOf('charcoal');
   const y = i => Math.floor(i / m.sx) % m.sy;
@@ -509,8 +517,8 @@ test('Robot: the legs and feet under its body can be hit from the start, and all
 });
 
 test('undo, a saved attempt and every send give back exactly the cubes that can be hit', () => {
-  for (const n of [LEVELS.findIndex(d => d.model === 'robot'), LEVELS.findIndex(d => d.model === 'treehouse')]) {
-    const L = buildLevel(n);
+  for (const n of [-1, LEVELS.findIndex(d => d.model === 'treehouse')]) { // -1: the robot
+    const L = n < 0 ? robotLevel() : buildLevel(n);
     const a = new Attempt(cloneBoard(L.board));
     assert.deepEqual(hitList(a.board), hittable(a.board), `level ${n + 1} at the start`);
     const rand = rng(n + 40);
@@ -636,6 +644,62 @@ test('a level\'s fingerprint is its own and stays the same', () => {
   const prints = LEVELS.map((_, n) => levelPrint(n));
   assert.equal(new Set(prints).size, LEVELS.length, 'every level has its own');
   assert.equal(levelPrint(4), prints[4], 'and the same one each time');
+  // Only what decides play counts, so a renamed level is not restarted on reopening.
+  const n = LEVELS.findIndex(d => d.lines && !d.hidden), def = LEVELS[n];
+  const printAs = changed => { LEVELS[n] = { ...def, ...changed }; try { return levelPrint(n); } finally { LEVELS[n] = def; } };
+  assert.equal(printAs({ name: `${def.name}, renamed`, greedy: [0, 100], follow: [0, 100], undos: 6, traps: [] }), prints[n], 'a new name, test band or trap keeps it');
+  assert.notEqual(printAs({ pads: def.pads + 1 }), prints[n], 'a pad more changes it');
+  const [first, ...others] = def.lines;
+  assert.notEqual(printAs({ lines: [first.split(',').reverse().join(','), ...others] }), prints[n], 'and so does a line of crew in another order');
+});
+
+test('a level\'s shape is its puzzle alone: a new sculpture, crew or pads change it, a new name does not', () => {
+  const shapes = LEVELS.map((_, n) => levelShape(n));
+  assert.equal(new Set(shapes).size, LEVELS.length, 'every level has its own');
+  const n = LEVELS.findIndex(d => d.lines && !d.hidden), def = LEVELS[n];
+  const shapeAs = changed => { LEVELS[n] = { ...def, ...changed }; try { return levelShape(n); } finally { LEVELS[n] = def; } };
+  assert.equal(shapeAs({ name: `${def.name}, renamed`, greedy: [0, 100], follow: [0, 100], undos: 6, traps: [] }), shapes[n], 'a new name, test band or trap keeps it');
+  assert.notEqual(shapeAs({ pads: def.pads + 1 }), shapes[n], 'a pad more changes it');
+  const [first, second, ...others] = def.lines, parts = first.split(',');
+  assert.notEqual(shapeAs({ lines: [parts.slice(0, -1).join(','), `${second},${parts.at(-1)}`, ...others] }), shapes[n], 'and so does a crew member moved to another line');
+  // The same sculpture under another name keeps it; two cubes of different colours swapped do not.
+  const same = `${def.model} again`, swapped = `${def.model} swapped`;
+  MODELS[same] = MODELS[def.model];
+  MODELS[swapped] = () => {
+    const m = MODELS[def.model](), cells = m.cells.slice();
+    const i = cells.findIndex(Boolean), j = cells.findIndex(c => c && c !== cells[i]);
+    [cells[i], cells[j]] = [cells[j], cells[i]];
+    return { ...m, cells };
+  };
+  try {
+    assert.equal(shapeAs({ model: same }), shapes[n], 'the sculpture cell for cell, not its name');
+    assert.notEqual(shapeAs({ model: swapped }), shapes[n], 'a changed cube changes it');
+  } finally { delete MODELS[same]; delete MODELS[swapped]; }
+});
+
+// The levels as another copy of js/ deals them, with `edit` made to one of its files.
+async function levelsWith(file, edit) {
+  const dir = mkdtempSync(join(tmpdir(), 'crumble-crew-'));
+  try {
+    cpSync(fileURLToPath(new URL('../js', import.meta.url)), dir, { recursive: true });
+    const text = readFileSync(join(dir, file), 'utf8'), changed = edit(text);
+    assert.notEqual(changed, text, `the edit to ${file} took`);
+    writeFileSync(join(dir, file), changed);
+    return await import(pathToFileURL(join(dir, 'levels.js')).href);
+  } finally { rmSync(dir, { recursive: true, force: true }); }
+}
+
+test('a new shade of a colour keeps both fingerprints; new rules change the print, not the shape', async () => {
+  const each = f => LEVELS.map((_, n) => f(n));
+  const shapes = each(levelShape), prints = each(levelPrint);
+  const shaded = await levelsWith('models.js', text => text.replace(/export const COLORS = \{[^}]*\}/, block =>
+    block.replace(/#([0-9a-f]{6})/g, (_, hex) => `#${(parseInt(hex, 16) ^ 0x010101).toString(16).padStart(6, '0')}`)));
+  LEVELS.forEach((_, n) => assert.notDeepEqual(shaded.buildLevel(n).model.palette, buildLevel(n).model.palette, `level ${n + 1} is drawn in other shades`));
+  assert.deepEqual(each(shaded.levelShape), shapes, 'every level keeps its shape');
+  assert.deepEqual(each(shaded.levelPrint), prints, 'and its print, so a half-played level comes back');
+  const ruled = await levelsWith('logic.js', text => text.replace(/export const RULES = (\d+);/, (_, v) => `export const RULES = ${Number(v) + 1};`));
+  assert.deepEqual(each(ruled.levelShape), shapes, 'new rules keep every shape, so stars and marks stay');
+  each(ruled.levelPrint).forEach((p, n) => assert.notEqual(p, prints[n], `but change level ${n + 1}'s print, so its saved attempt starts again`));
 });
 
 test('the shot the screen draws is the rules\' own record of it', () => {
@@ -660,11 +724,12 @@ test('a "?" stays a "?" only while there is more than one crew it could be', () 
   const same = makeBoard(stack(1, 1));
   same.columns = [[crew(0, 0, 1), h(1, 0, 1)], [crew(2, 0, 1), h(3, 0, 1)]];
   assert.equal(revealLone(same).length, 2);
-  for (let n = 0; n < LEVELS.length; n++) {
-    if (LEVELS[n].hidden !== 1) continue;
-    const L = buildLevel(n);
+  const dealt = LEVELS.filter(d => !d.lines);
+  assert.ok(dealt.length > 0, 'some level is dealt from its settings');
+  for (const def of dealt) {
+    const L = dealLevel({ ...def, hidden: 1 });
     assert.equal(L.hidden, 1);
-    assert.equal(L.board.columns.flat().filter(s => s.hidden).length, 0, `level ${n + 1}: its one hidden crew member is shown`);
+    assert.equal(L.board.columns.flat().filter(s => s.hidden).length, 0, `${def.name} dealt with one hidden crew member shows it`);
   }
 });
 
@@ -842,8 +907,8 @@ test('the forecast in words wraps to fit a phone, under a short condition', () =
 test('the deal picker\'s list mode ends with what it listed, not with "no deal"', () => {
   const r = spawnSync(process.execPath, ['tools/pick-deals.mjs', '1', '--list', '--tries=1'], { cwd: fileURLToPath(new URL('..', import.meta.url)), encoding: 'utf8' });
   assert.equal(r.status, 0, r.stderr);
-  assert.match(r.stderr, /^L1 Toadstool: deal \d+ /m, 'it lists deals');
-  assert.match(r.stdout.trim(), /^L1 Toadstool: \d+ deals? listed above/);
+  assert.match(r.stderr, /^L1 Doughnut: deal \d+ /m, 'it lists deals');
+  assert.match(r.stdout.trim(), /^L1 Doughnut: \d+ deals? listed above/);
   assert.doesNotMatch(r.stdout, /no deal/);
 });
 
@@ -963,7 +1028,10 @@ for (let n = 0; n < LEVELS.length; n++) {
     assert.ok(fire <= 30, `the winning line takes ${fire.toFixed(1)} s to fire, more than 30`);
     const rate = greedyCheck(L.board);
     const hasty = hastyCheck(L.board);
-    const fc = forecastCheck(L.board), fch = hastyForecastCheck(L.board), back = backtrackCheck(L.board);
+    // The hasty follower is only printed, never checked, and on the big boards it is by far the slowest
+    // measure (most of an hour for the treasure chest): measured with HASTY_FOLLOWER=1.
+    const fc = forecastCheck(L.board), back = backtrackCheck(L.board);
+    const fch = process.env.HASTY_FOLLOWER ? hastyForecastCheck(L.board) : { rate: '-' };
     measured[n] = { fc: fc.rate, undos: back.undos };
     const [lo, hi] = def.greedy;
     console.log(`  L${n + 1} ${def.name}: ${L.board.total} cubes, ${L.shooters} crew, ${def.pads} pads, ${hidden} "?", plan wins in ${p.boards} boards, fires in ${fire.toFixed(1)} s; of ${GREEDY_PLAYS}: greedy ${rate}% (band ${lo}-${hi}%) hasty ${hasty}%; forecast follower ${fc.rate}% (band ${def.follow.join('-')}%, ${fc.sends} sends), hasty ${fch.rate}%; with undo ${back.rate}%, median ${back.undos ?? '-'} undos (at most ${def.undos}), ${back.sends} sends`);
@@ -1002,6 +1070,25 @@ for (let n = 0; n < LEVELS.length; n++) {
     assert.deepEqual(misses, [], misses.join('; '));
   });
 }
+
+test('finding the traps along a line with a send that cannot happen names that send', () => {
+  const st = makeBoard(stack(1, 1));
+  st.columns = [[crew(0, 0, 2)]];
+  assert.throws(() => findTraps(st, [0, 0, 0]), /send 2 of the line cannot happen/);
+});
+
+test('traps.mjs design is not done when its winning line does not hold with the sends overlapping', () => {
+  // The globe's deal 5 has a trap moment as dealt, but its planned line loses when the sends overlap.
+  const r = spawnSync(process.execPath, ['tools/traps.mjs', 'design', 'globe', '--cols=3', '--pads=3', '--crew=70,110', '--deal=5', '--steps=0'], { cwd: fileURLToPath(new URL('..', import.meta.url)), encoding: 'utf8' });
+  assert.equal(r.status, 1, r.stderr);
+  assert.deepEqual(JSON.parse(r.stdout.trim().split('\n').at(-1)), { done: false, moments: 1, holds: false, fire: null });
+});
+
+test('a written solution with a send that cannot happen is refused', () => {
+  const n = LEVELS.findIndex(d => d.lines), def = LEVELS[n];
+  LEVELS[n] = { ...def, solution: [...def.solution, def.solution.at(-1)] };
+  try { assert.match(checkTraps(n).join('; '), /send \d+ of the solution cannot happen/); } finally { LEVELS[n] = def; }
+});
 
 test('crew written out by hand are read as written, and a line that cannot be played is refused', () => {
   const n = LEVELS.findIndex(d => d.lines);
