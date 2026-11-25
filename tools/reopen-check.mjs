@@ -13,6 +13,7 @@
 //        F. left with crew still landing and shots in the air: comes back at that very tick, every shot and pad as left.
 //        G. left out of room: comes back out of room, and a tap on undo takes back the last send.
 //        H. the new version changed that level: it starts again, whole, and says "Level changed. Restarted."
+//        I. the new version was found while playing (a short look away), then away 61 s: loads it on coming back.
 import { createRequire } from 'node:module';
 const require = createRequire(process.env.HOME + '/code/package.json');
 const { chromium } = require('playwright');
@@ -38,7 +39,7 @@ async function open(opts = {}) {
   await page.route(u => u.pathname.endsWith('/js/levels.js'), async route => {
     const r = await route.fetch();
     let js = await r.text();
-    if (s.changeDuck) js = js.replace("name: 'Bath Duck'", "name: 'Bath Duck, changed'");
+    if (s.changeLevel2) js += "\nLEVELS[1].name += ', changed';\n"; // the new version changed level 2
     await route.fulfill({ response: r, body: js, headers: { ...r.headers(), 'cache-control': 'no-store' } });
   });
   return { ctx, page, s };
@@ -213,7 +214,7 @@ async function half(level = 2) {
 }
 { // H
   const { ctx, page, s, was } = await half();
-  s.changeDuck = true; // the new version changed level 2
+  s.changeLevel2 = true;
   const d = s.docs;
   await vis(page, 'hidden'); await holdFrames(page); await shiftClock(page, 61000); await vis(page, 'visible');
   const re = await reloadedTo(page, s, d);
@@ -223,6 +224,19 @@ async function half(level = 2) {
     `H. the changed level started again, whole (${re ? `level ${now.level + 1}, ${now.sends} sends, ${now.cleared} cubes gone` : 'no reload'})`);
   ok(re && /Level changed\. Restarted\./.test(said) && /changed/.test(said.split(' | ')[1]), `H. it said so, in the new version (${said})`);
   ok(!s.errors.length, 'H. no page errors ' + s.errors.join(' | '));
+  await ctx.close();
+}
+{ // I
+  const { ctx, page, s, was } = await half();
+  let d = s.docs;
+  await vis(page, 'hidden'); await shiftClock(page, 5000); await vis(page, 'visible'); // a short look away finds the new version
+  const early = await reloadedTo(page, s, d, 4000);
+  ok(!early && (await build(page)) === 'aaa1111', `I. a short look away mid-level found the new version and kept playing the old one (${early ? 'reloaded' : 'kept'})`);
+  d = s.docs;
+  await vis(page, 'hidden'); await holdFrames(page); await shiftClock(page, 61000); await vis(page, 'visible');
+  const re = await reloadedTo(page, s, d);
+  const now = re && await snap(page);
+  ok(re && (await build(page)) === 'bbb2222' && JSON.stringify(now) === JSON.stringify(was), `I. then away 61 s: on coming back it loaded the new version, level as left (${re ? 'reloaded' : 'no reload'})`);
   await ctx.close();
 }
 await browser.close();
