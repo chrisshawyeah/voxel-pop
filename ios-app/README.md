@@ -2,9 +2,10 @@
 
 An Expo app whose one screen is a full-screen web view of the game at
 https://chrisshawyeah.github.io/voxel-pop/ . Game changes need no new install. The page decides
-when a new version loads, and only at a level boundary (a level with nothing sent yet, the next
-level after a win, the ending), never in the middle of a level: the app asks it to check each
-time it comes back to the front (`checkForUpdate` in `js/main.js`). When iOS has stopped the page
+when a new version loads: at a level boundary (a level with nothing sent yet, the next level after
+a win, the ending), or, when the app is opened or comes back after a minute or more away, before
+the first touch, even in the middle of a level, which comes back as it was left. The app asks it
+to check each time it comes back to the front (`checkForUpdate` in `js/main.js`). When iOS has stopped the page
 in the background, the app loads it again and the page puts the level back where it was.
 
 Build (on a build Mac, never the MacBook): make a blank Expo app, copy `App.js`, `app.json`

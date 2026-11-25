@@ -29,6 +29,7 @@ const LAND = 5;           // ticks (about 167 ms) a crew member takes to land on
 const NEXT_AFTER = 2400;  // milliseconds of confetti and stars before the next level starts
 const HOLD_MS = 300;      // a touch held this long on a front shows what sending it would do, and sends nobody
 const RETRY_MS = 60000;   // a reload that came back as the old version is tried again after this long
+const AWAY_MS = 60000;    // back after this long away, the game counts as reopened (a new version loads before the first touch)
 const LAST = LEVELS.length - 1;
 const TEACH_UNTIL = 2;    // levels 1 to 3 teach the first send and always show the forecast under each front
 const BUILD = document.querySelector('meta[name="build"]')?.content || 'dev';
@@ -68,6 +69,10 @@ let L, att, st, gen = 0, state = 'play', jamClock = 0, winClock = 0, bannerTimer
 let padEls = [], fronts = [];
 let previewOf = -1;          // the line whose preview is open, -1 when none
 let newBuild = '';           // a new version of the game is live and every file of it is fetched; it loads at the next level boundary
+let reopenedAt = Date.now(); // when the page was last loaded, or came back after AWAY_MS or more away
+let touchedAt = 0;           // the last touch on the page
+let hiddenAt = 0;            // when the page was hidden, 0 while it shows
+let lastWall = Date.now();   // the clock at the last frame: a gap of AWAY_MS or more means iOS held the page that long
 let dragged = 0;             // how far the last press on the sculpture moved, in pixels
 let speed = 1;               // 1, or R.FAST (R.pace in js/logic.js)
 const pressed = new Set();   // the pointers down now: while one is, the ticks run at 1x (R.pace)
@@ -902,7 +907,7 @@ window.addEventListener('keydown', e => { if (e.key === 'Escape') closePreview()
 // Every new press starts clean: a hold whose click never came (some browsers drop it after a long
 // press) must not swallow the next tap, wherever it lands. While a finger is down (holding a front,
 // turning the sculpture) the ticks run at 1x, even with every pad taken (R.pace).
-window.addEventListener('pointerdown', e => { held = false; pressed.add(e.pointerId); }, true);
+window.addEventListener('pointerdown', e => { held = false; pressed.add(e.pointerId); touchedAt = Date.now(); }, true);
 const lifted = e => { pressed.delete(e.pointerId); };
 window.addEventListener('pointerup', lifted, true);
 window.addEventListener('pointercancel', lifted, true);
@@ -912,6 +917,9 @@ let last = performance.now();
 function frame(now) {
   const dt = Math.max(0, Math.min(0.05, (now - last) / 1000)); // the first frame's time can come before the script's
   last = now;
+  const wall = Date.now();
+  if (wall - lastWall >= AWAY_MS) reopened(); // the frames stopped that long: the page was away
+  lastWall = wall;
   if (state === 'play') tick(dt);
   showView(dt);
   stage.update(dt);
@@ -949,10 +957,12 @@ function say(text, ms) {
 // does the new version load, and only at a level boundary: a level with nothing sent or undone,
 // the start of another level, or the ending. Otherwise it keeps playing this version and tries
 // again next time. A level left half-played is kept (saveAttempt) and checked against the new
-// version when it comes back. One more moment counts as a boundary: the page coming back into view
-// after AWAY_MS or more away (the iPhone app reopened), until the player's first touch; a level
-// left half-played then loads in the new version as it was left, or starts again when the new
-// version changed it.
+// version when it comes back.
+// Reopened (the page freshly loaded, or back after AWAY_MS or more away: hidden that long, or its
+// frames stopped that long while iOS held the app), the new version loads at once even in the
+// middle of a level, until the first touch: the level is saved as it is first, and comes back as it
+// was left, or starts again when the new version changed it (savedAttempt). After a touch it waits
+// for a level boundary as before.
 // (vendor/RoundedBoxGeometry.js is no longer used but stays in place: older versions still fetch it
 // here before they load a new one.)
 const FRESH = ['css/game.css', 'js/main.js', 'js/render.js', 'js/fx.js', 'js/audio.js', 'js/levels.js', 'js/logic.js', 'js/models.js',
@@ -962,7 +972,6 @@ let checking = false;
 const lastReload = () => { const [build, at] = String(store.get(UPDATE_KEY) || '').split('@'); return { build, at: Number(at) || 0 }; };
 if (lastReload().build === BUILD) store.remove(UPDATE_KEY); // that reload worked
 async function checkForUpdate() {
-  noteBack();
   if (BUILD === 'dev' || newBuild || checking) return;
   checking = true;
   try {
@@ -977,10 +986,25 @@ async function checkForUpdate() {
     const got = await Promise.all(FRESH.map(f => fetch(f, { cache: 'reload' }).then(r => r.ok && r.arrayBuffer().then(() => true), () => false)));
     if (!got.every(Boolean)) return; // a file did not come: no mix of old and new, try again later
     newBuild = live;
-    if (state === 'done') reloadAt(0);
-    else if (state === 'play' && !att.sends.length && !att.undos) reloadAt(current);
-    else if ((state === 'play' || state === 'jam') && backAt && touchedAt < backAt) { saveAttempt(); reloadAt(current); }
+    loadNewBuildWhenFree();
   } catch { /* offline: next time */ } finally { checking = false; }
+}
+function reopened() {
+  reopenedAt = Date.now();
+  if (newBuild) loadNewBuildWhenFree(); else checkForUpdate();
+}
+// The new version loads now when nothing is lost by it: at the ending, on a level with nothing sent
+// or undone, or reopened and not touched since, with the level saved as it is now.
+function loadNewBuildWhenFree() {
+  if (!newBuild || state === 'gone') return;
+  if (state === 'done') reloadAt(0);
+  else if (state === 'play' && !att.sends.length && !att.undos) reloadAt(current);
+  else if ((state === 'play' || state === 'jam') && reopenedAt > touchedAt && keptAsItIs()) reloadAt(current);
+}
+// Saves the level being played and reads it back: true only when storage holds it exactly as it is.
+function keptAsItIs() {
+  const text = JSON.stringify({ fp: printOf(current), ...att.save() });
+  return store.set(ATTEMPT_KEY(current), text) && store.get(ATTEMPT_KEY(current)) === text;
 }
 // The page is left for the new version: from here on nothing plays and nothing is saved, so a
 // restart that has just forgotten its attempt is not saved again as the page goes.
@@ -993,25 +1017,12 @@ function reloadAt(n) {
   if (store.get(SAVE_KEY) !== String(n)) u.searchParams.set('level', n + 1); // storage blocked
   location.replace(u.href);
 }
-// When the page last went out of view, when it last came back after AWAY_MS or more away (0: it
-// has not), and when the player last touched it. Every check for a new version is a coming back
-// (a fresh load, the page in view again, the iPhone app to the front). Time away is measured two
-// ways, as either may be missing: from the page going out of view, and from a clock that ticks only
-// while the page runs, which iOS stops while the app is in the background (the app's own call may
-// also come before the page hears it is in view again).
-const AWAY_MS = 60000;
-let hiddenAt = 0, backAt = 0, touchedAt = 0, aliveAt = Date.now();
-setInterval(() => { aliveAt = Date.now(); }, 5000);
-function noteBack() {
-  const now = Date.now();
-  if ((hiddenAt && now - hiddenAt >= AWAY_MS) || now - aliveAt >= AWAY_MS) backAt = now;
-  hiddenAt = 0;
-  aliveAt = now;
-}
-document.addEventListener('pointerdown', () => { touchedAt = Date.now(); }, true);
 document.addEventListener('visibilitychange', () => {
-  if (document.visibilityState === 'visible') checkForUpdate();
-  else { hiddenAt = Date.now(); saveAttempt(); pressed.clear(); if (st) teach(); } // iOS may stop the page from here on: keep the board as it is; a lesson stops counting
+  if (document.visibilityState === 'visible') {
+    const away = hiddenAt && Date.now() - hiddenAt >= AWAY_MS;
+    hiddenAt = 0;
+    if (away) reopened(); else checkForUpdate();
+  } else { hiddenAt = Date.now(); saveAttempt(); pressed.clear(); if (st) teach(); } // iOS may stop the page from here on: keep the board as it is; a lesson stops counting
 });
 window.addEventListener('pagehide', () => saveAttempt());
 window.addEventListener('pageshow', e => { if (e.persisted) checkForUpdate(); });
