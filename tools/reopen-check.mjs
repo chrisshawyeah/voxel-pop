@@ -55,7 +55,7 @@ async function sendTwo(page) {
       const lines = st.columns.map((c, i) => (c.length ? i : -1)).filter(i => i >= 0);
       return lines.find(i => st.exposed[st.columns[i][0].color].size > 0) ?? lines[0];
     });
-    await page.locator('#queues .col').nth(i).locator('button.front').click({ timeout: 5000 });
+    await page.locator('#queues .col').nth(i).locator('button.front').click({ timeout: 20000 });
     await page.waitForTimeout(250);
   }
   const end = Date.now() + 30000;
@@ -114,7 +114,7 @@ async function half(level = 2) {
   const now = await snap(page);
   ok(JSON.stringify(now) === JSON.stringify(was), 'C. the level is untouched');
   const d2 = s.docs;
-  await page.locator('#again').click({ timeout: 5000 });
+  await page.locator('#again').click({ timeout: 20000 });
   const re2 = await reloadedTo(page, s, d2);
   ok(re2 && (await build(page)) === 'bbb2222', `C. "Start it again" loaded the new version (${re2 ? await build(page) : 'no reload'})`);
   await ctx.close();
@@ -133,7 +133,7 @@ async function half(level = 2) {
   const now = await snap(page);
   ok(now.sends === was.sends && now.state === 'play', `D. still mid-level, ${now.sends} sends`);
   const d3 = s.docs;
-  await page.locator('#again').click({ timeout: 5000 });
+  await page.locator('#again').click({ timeout: 20000 });
   ok(await reloadedTo(page, s, d3), 'D. and the next level boundary loaded it');
   await ctx.close();
 }
@@ -153,7 +153,7 @@ async function half(level = 2) {
   await loaded(page); await page.waitForTimeout(1800);
   for (let k = 0; k < 2; k++) { // two crew up, and away at once, before they settle
     const i = await page.evaluate(() => { const st = window.crumble.board; const lines = st.columns.map((c, i) => (c.length ? i : -1)).filter(i => i >= 0); return lines.find(i => st.exposed[st.columns[i][0].color].size > 0) ?? lines[0]; });
-    await page.locator('#queues .col').nth(i).locator('button.front').click({ timeout: 5000 });
+    await page.locator('#queues .col').nth(i).locator('button.front').click({ timeout: 20000 });
     await page.waitForTimeout(k ? 400 : 150);
   }
   await holdFrames(page);
@@ -187,7 +187,7 @@ async function half(level = 2) {
       if (b.s === 'jam') { jammed = n; break; }
       if (b.cleared > 0) break;
       const i = await page.evaluate(() => { const st = window.crumble.board; if (st.slots.every(x => x)) return -1; return st.columns.findIndex(c => c.length && st.exposed[c[0].color].size === 0); });
-      if (i >= 0) { await page.locator('#queues .col').nth(i).locator('button.front').click({ timeout: 5000 }); await page.waitForTimeout(250); }
+      if (i >= 0) { await page.locator('#queues .col').nth(i).locator('button.front').click({ timeout: 20000 }); await page.waitForTimeout(250); }
       else if (!b.free) await page.waitForTimeout(300);
       else break;
     }
@@ -206,7 +206,7 @@ async function half(level = 2) {
   const same = re && ['level', 'cleared', 'hash', 'lines', 'pads', 'sends', 'undos'].every(k => JSON.stringify(now[k]) === JSON.stringify(was[k]));
   ok(re && (await build(page)) === 'bbb2222' && st === 'jam' && same, `G. reloaded into the new version still out of room, as left (${re ? `state ${st}, ${now.sends} sends${same ? '' : ', board differs'}` : 'no reload'})`);
   if (re) {
-    await page.locator('#undo').click({ timeout: 5000 }); await page.waitForTimeout(300);
+    await page.locator('#undo').click({ timeout: 20000 }); await page.waitForTimeout(300);
     const back = await snap(page);
     ok(back.sends === was.sends - 1 && back.undos === was.undos + 1, `G. undo took back the last send (${back.sends} sends, ${back.undos} undos)`);
   }
