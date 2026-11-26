@@ -48,7 +48,7 @@ async function open(opts = {}) {
     if (s.offline) { if (isDoc) s.docs++; return route.abort('internetdisconnected'); }
     const r = await route.fetch();
     const mark = isDoc ? s.doc : s.live;
-    const html = (await r.text()).replace('name="build" content="dev"', `name="build" content="${mark}"`);
+    const html = (await r.text()).replace(/name="build" content="[^"]*"/, `name="build" content="${mark}"`); // a local copy says "dev", the live page its own build
     if (isDoc) { s.docs++; s.served = mark; if (s.afterDoc) { s.doc = s.afterDoc; s.afterDoc = null; } }
     else if (s.delay) await new Promise(res => setTimeout(res, s.delay));
     else if (s.hang) { const ms = s.hang; s.hang = 0; await new Promise(res => setTimeout(res, ms)); } // this one ask gets no answer for that long
