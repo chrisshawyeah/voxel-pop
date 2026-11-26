@@ -19,12 +19,15 @@
 //                                         leaves the level won with at least as many trap moments,
 //                                         until one to three moments have a trap; then prints it
 //                                         as `lines`, measured, like search --measure
-//   node tools/traps.mjs design --level=6 [--seed=1 --steps=200]
+//   node tools/traps.mjs design --level=6 [--seed=1 --steps=200 --tune --undos=0]
 //                                         the same, starting from level 6's own lines; with
 //                                         --tune it keeps going until rushing (the hasty greedy
 //                                         player) wins no more than 6 points above waiting and the
 //                                         greedy player is inside the level's band, by quick
-//                                         looks of 120 plays each, keeping one to three moments
+//                                         looks of 120 plays each, then until the forecast
+//                                         follower is inside the level's follow band and the
+//                                         backtracking player's median undos are at most the
+//                                         level's (or --undos), keeping one to three moments
 //
 // A trap [k, j]: after the first k sends of the solution (each followed by waiting until the pads
 // stop, as the planning player plays), sending line j instead loses whatever comes after, and
@@ -102,8 +105,10 @@ export function linesOf(board, names) {
 
 // The commands run only when this file is run, not when the tests import checkTraps.
 const main = process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href;
-const [cmd, arg, ...rest] = main ? process.argv.slice(2) : [];
-const opt = (name, dflt) => { const a = rest.find(x => x.startsWith(`--${name}=`)); return a ? a.slice(name.length + 3) : dflt; };
+// The command and its level or model are the words that are not flags; the flags may come anywhere.
+const args = main ? process.argv.slice(2) : [];
+const [cmd, arg] = args.filter(x => !x.startsWith('--'));
+const opt = (name, dflt) => { const a = args.find(x => x.startsWith(`--${name}=`)); return a ? a.slice(name.length + 3) : dflt; };
 if (cmd === 'check') {
   let bad = 0;
   LEVELS.forEach((def, n) => {
@@ -124,7 +129,7 @@ if (cmd === 'check') {
     mix: Number(opt('mix', 0.2)), flip: Number(opt('flip', 0.6)),
   };
   const from = Number(opt('from', 0)), tries = Number(opt('tries', 30));
-  const measure = rest.includes('--measure');
+  const measure = args.includes('--measure');
   const names = modelFor(def).names;
   for (let deal = from; deal < from + tries; deal++) {
     const L = dealLevel({ ...def, deal });
@@ -145,8 +150,9 @@ if (cmd === 'check') {
     console.log(JSON.stringify(out));
   }
 } else if (cmd === 'design') {
-  const level = arg && arg.startsWith('--level=') ? Number(arg.slice(8)) - 1 : (opt('level', null) === null ? -1 : Number(opt('level')) - 1);
-  const tune = rest.includes('--tune') || arg === '--tune';
+  const level = opt('level', null) === null ? -1 : Number(opt('level')) - 1;
+  if (opt('level', null) !== null && !LEVELS[level]) throw new Error(`there is no level ${opt('level')}: the levels are 1 to ${LEVELS.length}`);
+  const tune = args.includes('--tune');
   const def = level >= 0 ? LEVELS[level] : {
     name: arg, model: arg, cols: Number(opt('cols', 3)), pads: Number(opt('pads', 3)),
     crew: opt('crew', '60,100').split(',').map(Number), hidden: Number(opt('hidden', 0)),
@@ -169,7 +175,8 @@ if (cmd === 'check') {
   // how many pads it leaves taken once the pads stop, and how many shots are left parked on them.
   const judge = cs => {
     const st = boardOf(cs);
-    const p = plan(st, { budget: 60000 });
+    // Tuning plans as the level tests do, for a line that also wins with the sends overlapping.
+    const p = plan(st, tune ? { holds: line => lineHolds(st, line) } : { budget: 60000 });
     if (!p.win) return { score: -1 };
     const traps = [];
     let near = 0;
@@ -188,13 +195,33 @@ if (cmd === 'check') {
     const moments = new Set(traps.map(t => t[0])).size;
     const r = { score: (moments > 3 ? 3 - moments / 10 : moments) * 10 + near, moments, traps, line: p.line, st };
     // Tuning: with its moments in place, a change is judged by how far rushing wins above waiting
-    // and the greedy player sits outside the level's band (quick looks; the full measures follow).
-    if (tune && moments >= 1 && moments <= 3) {
+    // and the greedy player sits outside the level's band (quick looks; the full measures follow),
+    // 3 points inside it except at 0 or 100, as tools/pick-deals.mjs keeps it. With those in place,
+    // a level's forecast follower is judged against its follow band (2 points inside it except at 0
+    // or 100), and then the backtracking player's median undos against the level's `undos`, or
+    // --undos= when the curve needs fewer; both by the level tests' own measures. Each stage counts
+    // only once the one before it is met, and a miss counts a ten-thousandth of a point, so a board
+    // with its moments in place still ranks above every board without them.
+    // A line that does not hold, or takes over 30 s to fire, misses most of all.
+    if (tune && moments >= 1 && moments <= 3 && (!p.holds || !(firingTime(st, p.line) <= 30))) r.score = 40 - 0.3;
+    else if (tune && moments >= 1 && moments <= 3) {
       const g = greedyRate(st, rng(1777), 120), h = hastyRate(st, rng(1778), 120);
       const [lo, hi] = def.greedy || [0, 100];
-      r.miss = Math.max(0, h - g - 6) + Math.max(0, lo + 3 - g) + Math.max(0, g - hi + 3);
-      r.score = 40 - r.miss;
       r.quick = { greedy: g, hasty: h };
+      r.miss = Math.max(0, h - g - 6) + (lo > 0 ? Math.max(0, lo + 3 - g) : 0) + (hi < 100 ? Math.max(0, g - hi + 3) : 0);
+      if (def.follow) {
+        if (r.miss) r.miss += 2000;
+        else {
+          const f = r.quick.follow = forecastCheck(st).rate, [flo, fhi] = def.follow;
+          r.miss = (flo > 0 ? Math.max(0, flo + 2 - f) : 0) + (fhi < 100 ? Math.max(0, f - fhi + 2) : 0);
+          if (r.miss) r.miss += 1000;
+          else {
+            const u = r.quick.undos = backtrackCheck(st).undos;
+            r.miss = u === null ? 100 : Math.max(0, u - Number(opt('undos', def.undos)));
+          }
+        }
+      }
+      r.score = 40 - r.miss / 10000;
     }
     return r;
   };
@@ -208,7 +235,7 @@ if (cmd === 'check') {
     else { const [s] = next[a].splice(i, 1); next[b].splice(Math.floor(rand() * (next[b].length + 1)), 0, s); } // one moves to another place
     if (!playable(next) || JSON.stringify(next) === JSON.stringify(cols)) continue;
     const r = judge(next);
-    if (r.score >= best.score) { cols = next; best = r; console.log(JSON.stringify({ step, moments: r.moments, score: r.score, quick: r.quick })); }
+    if (r.score >= best.score) { cols = next; best = r; console.log(JSON.stringify({ step, moments: r.moments, score: r.score, quick: r.quick, lines: r.st && linesOf(r.st, names) })); }
   }
   if (!settled(best)) { console.log(JSON.stringify({ done: false, moments: best.moments, quick: best.quick })); process.exit(1); }
   const st = best.st;

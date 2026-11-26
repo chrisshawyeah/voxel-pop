@@ -231,6 +231,23 @@ test('a cube seen at a slant into a notch can be hit, though no straight line of
   assert.equal(seen(st, green), false, 'from the back the slab hides it');
 });
 
+test('a band across a face, between a ledge over it and a low rim far in front, can be hit', () => {
+  // A green cube in a red wall, only its front face open; a red ledge sticks out over the gap in
+  // front of it and a low red rim stands four cells out. From a little above level the ledge hides
+  // the top of the face and the rim its middle and bottom edge, so the middle and the four corners
+  // of the face are all hidden, but a band across it shows: a third of a face on the screen.
+  const cubes = [[1, 1, 1, 2], [0, 1, 1, 1], [2, 1, 1, 1], [1, 2, 1, 1], [1, 0, 1, 1], [1, 1, 0, 1]];
+  for (let x = 0; x < 3; x++) cubes.push([x, 2, 2, 1], [x, 1, 6, 1]);
+  const m = grid(3, 3, 7, cubes);
+  const st = makeBoard(m);
+  const green = at(m, 1, 1, 1);
+  setView(st, 0, pitchUnits(0.12), 0);
+  const share = (pixels(st, camPos(st), lookAt(st), 14, 0.66, 390, 590).get(green) || 0) / facePixels(camPos(st), lookAt(st), 14, 590);
+  assert.ok(share >= 0.3, `${Math.round(share * 100)}% of a face of the green cube shows on the screen`);
+  st.slots = [crew(0, 1, 1)];
+  assert.equal(target(st, 1), green, 'so green fires at it');
+});
+
 test('the camera can look from below and from almost straight above; from below it sees the underside', () => {
   assert.ok(pitchRad(0) < -1 && pitchRad(PITCH_STEPS - 1) > 1.4, 'from well below level to almost straight down');
   const st = makeBoard(stack(1));
@@ -280,6 +297,25 @@ test('the camera that swings for crew who wait looks from below too, under a par
   while (shotAt < 0 && st.tick < 2 * STALL) if (step(st).shots.length) shotAt = st.tick;
   assert.ok(shotAt > SEEK && shotAt <= SEEK + 1, `green fired once the camera swung below (tick ${shotAt})`);
   assert.ok(st.pitch < START_PITCH, 'the camera was looking from low down');
+});
+
+test('the camera that swings for crew who wait finds a cube that shows only at a steep slant, down a deep pit', () => {
+  // A red block with an L-shaped pit eight deep around one column; a green cube at the pit's bottom,
+  // under that column, opens only two sides into the pit. They show only from high above, each
+  // turned far from the camera, a part of each adding up to a quarter of a face (shows()).
+  const cubes = [];
+  for (let x = 0; x < 5; x++) for (let y = 0; y < 9; y++) for (let z = 0; z < 5; z++) {
+    if (y > 0 && x > 0 && x < 4 && z > 0 && z < 4 && (x > 1 || z > 1)) continue; // the pit
+    cubes.push([x, y, z, x === 1 && y === 1 && z === 1 ? 2 : 1]);
+  }
+  const m = grid(5, 9, 5, cubes);
+  const st = makeBoard(m);
+  const green = at(m, 1, 1, 1);
+  st.slots = [crew(0, 1, 1)];
+  let shot = null;
+  while (!shot && st.tick < 2 * STALL) shot = step(st).shots[0];
+  assert.ok(shot && shot.cell === green && st.tick > SEEK && st.tick <= SEEK + 1, `green fired once the camera swung up over the pit (tick ${st.tick})`);
+  assert.ok(st.pitch > START_PITCH, 'the camera was looking from high up');
 });
 
 test('every shot takes a cube that shows on the phone screen at the moment it leaves', () => {
@@ -520,11 +556,13 @@ test('Robot: the legs and feet under its body can be hit from the start, and all
 // The other half of "the crew hit only what you can see": what shows on the screen can be hit. The
 // player holds the duck still at a view picked at random, again and again, while crew are sent at
 // random; whenever a crew member on a pad has nothing it may hit, a picture of a phone's screen from
-// that view (tools/sight.mjs) must show no more than a sliver of any cube of its colour.
+// that view (tools/sight.mjs) must show no more than a sliver of any cube of its colour. While a crew
+// member waits nobody else is sent and the view holds still, so the same board and view come round
+// tick after tick until the next view: each is looked at once, and those are what is counted.
 test('a crew member never waits while a good part of a cube of its colour shows on the screen', () => {
   const FOV = 14, ASP = 0.66, W = 390, H = 590;
-  let waits = 0;
-  for (let play = 0; play < 2; play++) {
+  const looked = new Set();
+  for (let play = 0; play < 40; play++) {
     const st = dealLevel({ name: 'Bath Duck', model: 'duck', cols: 4, pads: 3, crew: [50, 80], hidden: 0, mix: 0.1, flip: 0.5, deal: 12 }).board;
     const rand = rng(500 + play);
     for (let t = 0; t < 6000 && !isWon(st) && !isJammed(st); t++) {
@@ -533,9 +571,10 @@ test('a crew member never waits while a good part of a cube of its colour shows 
         const cols = st.columns.map((c, i) => i).filter(i => st.columns[i].length);
         deploy(st, cols[Math.floor(rand() * cols.length)]);
       }
-      const waiting = t % 6 === 0 ? st.slots.filter(s => s && s.count > 0 && !(s.land > 0) && st.exposed[s.color].size && target(st, s.color) < 0) : [];
-      if (waiting.length) {
-        waits++;
+      const waiting = st.slots.filter(s => s && s.count > 0 && !(s.land > 0) && st.exposed[s.color].size && target(st, s.color) < 0);
+      const situation = `${play} ${st.rev} ${st.yaw} ${st.pitch} ${waiting.map(s => s.color).sort()}`;
+      if (waiting.length && !looked.has(situation)) {
+        looked.add(situation);
         const p = pitchRad(st.pitch), a = yawRad(st.yaw), at = lookAt(st), d = camBack(FOV, ASP, st.topY, st.reachR, p);
         const cam = [at[0] - Math.cos(p) * d * Math.sin(a), at[1] + Math.sin(p) * d, at[2] + Math.cos(p) * d * Math.cos(a)];
         const px = pixels(st, cam, at, FOV, ASP, W, H), full = facePixels(cam, at, FOV, H);
@@ -547,7 +586,7 @@ test('a crew member never waits while a good part of a cube of its colour shows 
       tickGame(st);
     }
   }
-  assert.ok(waits > 50, `the crew waited ${waits} times: enough to tell`);
+  assert.ok(looked.size > 2000, `the crew waited at ${looked.size} different boards and views: enough to tell`);
 });
 
 test('undo, a saved attempt and every send give back exactly the cubes that can be hit', () => {
@@ -1136,4 +1175,26 @@ test('crew written out by hand are read as written, and a line that cannot be pl
   assert.throws(tryLines([first.replace(`${name} ${count}`, `${name} ${Number(count) + 10}`), ...others]), /pop \d+ cubes/, 'a colour that does not add up');
   assert.throws(tryLines([first.replace(`${name} ${count}`, `nocolour ${count}`), ...others]), /not a colour/, 'a colour the sculpture lacks');
   assert.throws(tryLines([`?${first.trim()}`, ...others]), /front of line 1 is hidden/, 'a hidden front');
+});
+
+test('traps.mjs design reads a flag that comes before the model, and refuses a level that does not exist', () => {
+  const design = args => spawnSync(process.execPath, ['tools/traps.mjs', 'design', ...args], { cwd: fileURLToPath(new URL('..', import.meta.url)), encoding: 'utf8' });
+  // --steps=0 first still stops at once: the globe's deal 5 as dealt, as in the test above.
+  const r = design(['--steps=0', 'globe', '--cols=3', '--pads=3', '--crew=70,110', '--deal=5']);
+  assert.equal(r.status, 1, r.stderr);
+  assert.deepEqual(JSON.parse(r.stdout.trim().split('\n').at(-1)), { done: false, moments: 1, holds: false, fire: null });
+  for (const n of ['0', `${LEVELS.length + 1}`, 'six']) {
+    const bad = design(['--steps=0', `--level=${n}`]);
+    assert.notEqual(bad.status, 0);
+    assert.match(bad.stderr, new RegExp(`there is no level ${n}: the levels are 1 to ${LEVELS.length}`));
+  }
+});
+
+test('traps.mjs design --tune keeps no margin at a band edge of 0 or 100, as tools/pick-deals.mjs does', () => {
+  // The atom's deal 15 has three trap moments and a quick greedy look of 0, inside the band [0, 100] a
+  // dealt sculpture has: tuning is done at once, and the full checks follow (holds and fire, not quick).
+  const r = spawnSync(process.execPath, ['tools/traps.mjs', 'design', 'atom', '--crew=30,50', '--deal=15', '--tune', '--steps=0'], { cwd: fileURLToPath(new URL('..', import.meta.url)), encoding: 'utf8' });
+  const out = JSON.parse(r.stdout.trim().split('\n').at(-1));
+  assert.equal(out.moments, 3, r.stdout);
+  assert.ok('holds' in out && !('quick' in out), r.stdout);
 });

@@ -31,7 +31,7 @@ export const FAST = 3;        // how much faster the ticks run while there is no
 // Which version of these rules a saved attempt was played under (js/main.js keeps it with the
 // save). Add one whenever a change here makes the same sends end on a different board, so a level
 // left half-played under the old rules starts again instead of coming back wrong.
-export const RULES = 8;
+export const RULES = 9;
 // The view (see the top of this file). A turn of the sculpture is YAW_STEPS steps; on its own it
 // turns TURN steps a tick (about 0.41 radians a second, a turn in 15 seconds at normal speed). The
 // camera looks from PITCH_MIN to PITCH_MAX radians above level in PITCH_STEPS steps: from well
@@ -140,6 +140,7 @@ export function makeBoard(model) {
     out: new Uint8Array(cells.length), taken: new Uint8Array(cells.length), side: new Uint8Array(cells.length),
     qKey: new Int32Array(cells.length).fill(-1), qBlock: new Int32Array(cells.length),
     fKey: new Int32Array(cells.length).fill(-1), fN: new Uint8Array(cells.length), fBlock: new Int32Array(cells.length * F_KEEP), fRev: new Int32Array(cells.length),
+    sKey: new Int32Array(cells.length).fill(-1), sN: new Uint8Array(cells.length), sBlock: new Int32Array(cells.length * F_KEEP), sRev: new Int32Array(cells.length),
     reachR, topY,
     remaining: new Int32Array(n),
     exposed: Array.from({ length: n }, () => new Set()),
@@ -187,6 +188,7 @@ export function cloneBoard(st) {
     taken: Uint8Array.from(st.taken), side: Uint8Array.from(st.side),
     qKey: Int32Array.from(st.qKey), qBlock: Int32Array.from(st.qBlock),
     fKey: Int32Array.from(st.fKey), fN: Uint8Array.from(st.fN), fBlock: Int32Array.from(st.fBlock), fRev: Int32Array.from(st.fRev),
+    sKey: Int32Array.from(st.sKey), sN: Uint8Array.from(st.sN), sBlock: Int32Array.from(st.sBlock), sRev: Int32Array.from(st.sRev),
     aimKey: Float64Array.from(st.aimKey), aimCell: Int32Array.from(st.aimCell),
     memo: null, memoRev: -1,
     remaining: Int32Array.from(st.remaining),
@@ -493,40 +495,70 @@ function faceView(st, i) {
 // The last look, for a cube that fails both checks above but still shows a good part of itself on
 // the screen (Chris, November 26th: yellow cubes in plain view on the bath duck that no yellow crew
 // would hit): how much of it shows, as a share of one whole face seen square on, the way a picture
-// of the screen counts it (tools/sight.mjs). A face turned to the camera with at least one of its
-// FACE_POINTS clear is looked at again on a finer grid of SHOW_GRID x SHOW_GRID points, and the
-// share of them clear, times how squarely the face is turned to the camera, is what shows of it
-// (a face turned far from the camera adds little, but two of them on a corner add up);
-// the faces add up. A cube showing SHOW_MIN or more can be hit. A face with none of the five points
-// clear shows at most a thin strip along an edge, and is not looked at again.
-const SHOW_GRID = 4, SHOW_MIN = 0.25, SHOW_FACING = 0.1; // a face turned up to about 84 degrees away still adds what shows of it
+// of the screen counts it (tools/sight.mjs). Every face turned to the camera is looked at on a
+// grid of SHOW_GRID x SHOW_GRID points, and the share of them clear, times how squarely the face
+// is turned to the camera, is what shows of it (a face turned far from the camera adds little, but
+// two of them on a corner add up); the faces add up. A cube showing SHOW_MIN or more can be hit.
+// The grid counts a little under the picture where a band of a face shows between its points, so
+// SHOW_MIN sits under a quarter: then a cube showing 30% of a face on the picture is always taken
+// (40 plays of the duck test), and one taken never shows under a tenth (all 20 levels, still views).
+// Kept per cube for this view and these faces, as faceView() keeps its answer.
+const SHOW_GRID = 6, SHOW_MIN = 0.22, SHOW_FACING = 0.1; // a face turned up to about 84 degrees away still adds what shows of it
 function shows(st, i) {
   const open = openFaces(st, i);
   if (!open) return false;
-  const C = camPos(st), { sx, sy } = st;
+  const key = viewKey(st) * 64 + open;
+  if (st.sKey[i] === key) {
+    const k = st.sN[i], base = i * F_KEEP;
+    if (k === 255) return true;
+    let still = k <= F_KEEP || st.sRev[i] === st.rev;
+    for (let q = 0; q < k && q < F_KEEP && still; q++) if (!st.cells[st.sBlock[base + q]]) still = false;
+    if (still) return false;
+  }
+  st.sKey[i] = key; st.sRev[i] = st.rev;
+  return showsAt(st, i, open, camPos(st), true);
+}
+// What shows() asks, from the camera at C and for the open faces `open`. It stops once even every
+// line not yet tried being clear would leave less than SHOW_MIN (`most`), which is most of the
+// time for a cube that does not show. With `keep`, the answer is kept for shows(): the cubes that
+// blocked a line tried (each once), or 255 when it shows.
+function showsAt(st, i, open, C, keep) {
+  const { sx, sy } = st, base = i * F_KEEP, G = SHOW_GRID * SHOW_GRID;
   const cx = (i % sx) + 0.5, cy = (Math.floor(i / sx) % sy) + 0.5, cz = Math.floor(i / (sx * sy)) + 0.5;
-  const clearAt = (px, py, pz) => {
-    const wx = C[0] - px, wy = C[1] - py, wz = C[2] - pz, L = Math.hypot(wx, wy, wz);
-    return lineFrom(st, i, px, py, pz, wx / L, wy / L, wz / L) === -1;
-  };
-  let share = 0;
+  const facing = [0, 0, 0, 0, 0, 0];
+  let most = 0;
   for (let f = 0; f < 6; f++) {
     if (!(open & (1 << f))) continue;
     const n = FACE_N[f];
-    const fx = cx + n[0] * 0.5, fy = cy + n[1] * 0.5, fz = cz + n[2] * 0.5;
-    const ox = C[0] - fx, oy = C[1] - fy, oz = C[2] - fz, od = Math.hypot(ox, oy, oz);
-    const facing = (n[0] * ox + n[1] * oy + n[2] * oz) / od;
-    if (facing <= SHOW_FACING) continue;
-    const ax = n[0] ? 0 : n[1] ? 1 : 2; // the face's edges run along the other two axes
-    const at = (a, b) => [fx + (ax === 1 ? b : ax === 2 ? a : 0), fy + (ax === 2 ? b : ax === 0 ? a : 0), fz + (ax === 0 ? b : ax === 1 ? a : 0)];
-    if (!FACE_POINTS.some(([a, b]) => clearAt(...at(a, b)))) continue;
-    let clear = 0;
-    for (let u = 0; u < SHOW_GRID; u++) {
-      for (let v = 0; v < SHOW_GRID; v++) if (clearAt(...at((u + 0.5) / SHOW_GRID - 0.5, (v + 0.5) / SHOW_GRID - 0.5))) clear++;
-    }
-    share += (clear / (SHOW_GRID * SHOW_GRID)) * facing;
-    if (share >= SHOW_MIN) return true;
+    const ox = C[0] - (cx + n[0] * 0.5), oy = C[1] - (cy + n[1] * 0.5), oz = C[2] - (cz + n[2] * 0.5);
+    facing[f] = (n[0] * ox + n[1] * oy + n[2] * oz) / Math.hypot(ox, oy, oz);
+    if (facing[f] > SHOW_FACING) most += facing[f];
   }
+  let share = 0, k = 0;
+  for (let f = 0; f < 6 && most >= SHOW_MIN - 1e-9; f++) {
+    if (!(open & (1 << f)) || facing[f] <= SHOW_FACING) continue;
+    const n = FACE_N[f];
+    const fx = cx + n[0] * 0.5, fy = cy + n[1] * 0.5, fz = cz + n[2] * 0.5;
+    const ax = n[0] ? 0 : n[1] ? 1 : 2; // the face's edges run along the other two axes
+    let clear = 0;
+    for (let p = 0; p < G && most >= SHOW_MIN - 1e-9; p++) {
+      const a = (Math.floor(p / SHOW_GRID) + 0.5) / SHOW_GRID - 0.5, b2 = ((p % SHOW_GRID) + 0.5) / SHOW_GRID - 0.5;
+      const px = fx + (ax === 1 ? b2 : ax === 2 ? a : 0), py = fy + (ax === 2 ? b2 : ax === 0 ? a : 0), pz = fz + (ax === 0 ? b2 : ax === 1 ? a : 0);
+      const wx = C[0] - px, wy = C[1] - py, wz = C[2] - pz, L = Math.hypot(wx, wy, wz);
+      const b = lineFrom(st, i, px, py, pz, wx / L, wy / L, wz / L);
+      if (b === -1) { clear++; continue; }
+      most -= facing[f] / G;
+      if (!keep || k > F_KEEP) continue;
+      let q = 0;
+      while (q < k && st.sBlock[base + q] !== b) q++;
+      if (q < k) continue;
+      if (k < F_KEEP) st.sBlock[base + k] = b;
+      k++;
+    }
+    share += (clear / G) * facing[f];
+    if (share >= SHOW_MIN) { if (keep) st.sN[i] = 255; return true; }
+  }
+  if (keep) st.sN[i] = k;
   return false;
 }
 
@@ -702,10 +734,11 @@ function* heights(st, by) {
   }
 }
 // The nearest view, [turn, height], from which an open face of a cube the crew wait for shows
-// with `need` of its points in clear sight; null when none does. Every other height is tried,
-// nearest first, and at each every other step of the turn, nearest first, for SWING_CUBES of each
-// colour's cubes. A search that found nothing finds nothing again while the board and the crew
-// waiting stay the same, so that answer is kept.
+// with `need` of its points in clear sight, or, for `need` 0, from which the cube shows SHOW_MIN of
+// itself (shows()); null when none does. Every other height is tried, nearest first, and at each
+// every other step of the turn, nearest first, for SWING_CUBES of each colour's cubes. A search
+// that found nothing finds nothing again while the board and the crew waiting stay the same, so
+// that answer is kept.
 function viewShowing(st, need) {
   const miss = `${need} ${st.rev} ${st.slots.map(s => (s && s.count > 0 && !(s.land > 0) ? s.color : -1)).join()}`;
   if (st.swingMiss === miss) return null;
@@ -715,19 +748,20 @@ function viewShowing(st, need) {
     for (let k = 0; k < n; k += SWING_STEP) {
       const y = (((here + (k % 2 ? (k + 1) / 2 : -k / 2)) % n + n) % n) * VIEW_STEP + VIEW_STEP / 2;
       const C = camAt(st, y, u);
-      for (let q = 0; q < faces.length; q += 2) if (faceShows(st, faces[q], faces[q + 1], C, need)) return [y, u];
+      for (let q = 0; q < faces.length; q += 2) if (need ? faceShows(st, faces[q], faces[q + 1], C, need) : faces[q] !== faces[q - 2] && showsAt(st, faces[q], openFaces(st, faces[q]), C, false)) return [y, u];
     }
   }
   st.swingMiss = miss;
   return null;
 }
 // Crew have waited SEEK ticks with nothing of theirs in view: the camera swings to the nearest view
-// that shows a fair part of a cube they wait for, else to one that shows a sliver (and a sliver
-// will do, faceView()); when none shows from anywhere, the view stays as it is. The view then holds
-// still for FLIGHT ticks (st.hold), so the cube still shows when the shot lands.
+// that shows a fair part of a cube they wait for (FACE_NEED of a face's points, else a quarter of a
+// face, shows()), else to one that shows a sliver (and a sliver will do, faceView()); when none
+// shows from anywhere, the view stays as it is. The view then holds still for FLIGHT ticks
+// (st.hold), so the cube still shows when the shot lands.
 function swing(st) {
   for (const s of st.slots) if (s && s.count > 0 && !(s.land > 0) && target(st, s.color) >= 0) return;
-  for (const need of [FACE_NEED, 1]) {
+  for (const need of [FACE_NEED, 0, 1]) {
     const v = viewShowing(st, need);
     if (!v) continue;
     st.yaw = v[0]; st.pitch = v[1]; st.seekH = v[1]; st.hold = FLIGHT;
