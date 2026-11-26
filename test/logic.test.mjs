@@ -6,8 +6,8 @@ import { join } from 'node:path';
 import { spawnSync } from 'node:child_process';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { makeBoard, cloneBoard, removeCube, deploy, fire, step, settle, launch, target, isJammed, isWon, canFire, canReach, purgeCleared, isExposed, freeSlot, FLIGHT, tickGame, advance, forecast, forecastKey, fates, busy, revealLone, checkOf, pace, Attempt, FAST,
-  setView, seen, camPos, lookAt, pitchUnits, pitchRad, YAW_STEPS, START_YAW, START_PITCH, PITCH_STEPS, TURN, SEEK, STALL } from '../js/logic.js';
-import { pixels } from '../tools/sight.mjs';
+  setView, seen, camPos, lookAt, pitchUnits, pitchRad, yawRad, camBack, YAW_STEPS, START_YAW, START_PITCH, PITCH_STEPS, TURN, SEEK, STALL } from '../js/logic.js';
+import { pixels, facePixels } from '../tools/sight.mjs';
 import { checkTraps, findTraps } from '../tools/traps.mjs';
 import { LEVELS, buildLevel, dealLevel, levelPrint, levelShape, rng } from '../js/levels.js';
 import { MODELS } from '../js/models.js';
@@ -514,6 +514,40 @@ test('Robot: the legs and feet under its body can be hit from the start, and all
   assert.ok(firstLeg > 0, 'a leg cube was hit');
   assert.equal(a.board.remaining[grey], 0, 'every grey cube, legs included');
   assert.equal(a.board.cleared, st.remaining[grey], 'and not one cube of another colour went');
+});
+
+// Chris, November 26th: on the bath duck, yellow cubes in plain view that his yellow crew never hit.
+// The other half of "the crew hit only what you can see": what shows on the screen can be hit. The
+// player holds the duck still at a view picked at random, again and again, while crew are sent at
+// random; whenever a crew member on a pad has nothing it may hit, a picture of a phone's screen from
+// that view (tools/sight.mjs) must show no more than a sliver of any cube of its colour.
+test('a crew member never waits while a good part of a cube of its colour shows on the screen', () => {
+  const FOV = 14, ASP = 0.66, W = 390, H = 590;
+  let waits = 0;
+  for (let play = 0; play < 2; play++) {
+    const st = dealLevel({ name: 'Bath Duck', model: 'duck', cols: 4, pads: 3, crew: [50, 80], hidden: 0, mix: 0.1, flip: 0.5, deal: 12 }).board;
+    const rand = rng(500 + play);
+    for (let t = 0; t < 6000 && !isWon(st) && !isJammed(st); t++) {
+      if (t % 300 === 0) { st.spin = 0; st.yaw = Math.floor(rand() * YAW_STEPS); st.pitch = Math.floor(rand() * PITCH_STEPS); st.home = st.pitch; }
+      if (freeSlot(st) >= 0 && !busy(st)) {
+        const cols = st.columns.map((c, i) => i).filter(i => st.columns[i].length);
+        deploy(st, cols[Math.floor(rand() * cols.length)]);
+      }
+      const waiting = t % 6 === 0 ? st.slots.filter(s => s && s.count > 0 && !(s.land > 0) && st.exposed[s.color].size && target(st, s.color) < 0) : [];
+      if (waiting.length) {
+        waits++;
+        const p = pitchRad(st.pitch), a = yawRad(st.yaw), at = lookAt(st), d = camBack(FOV, ASP, st.topY, st.reachR, p);
+        const cam = [at[0] - Math.cos(p) * d * Math.sin(a), at[1] + Math.sin(p) * d, at[2] + Math.cos(p) * d * Math.cos(a)];
+        const px = pixels(st, cam, at, FOV, ASP, W, H), full = facePixels(cam, at, FOV, H);
+        for (const s of waiting) for (const i of st.exposed[s.color]) {
+          const share = (px.get(i) || 0) / full;
+          assert.ok(share < 0.3, `a crew member waits at tick ${st.tick} while ${Math.round(share * 100)}% of a face of cube ${i} of its colour shows`);
+        }
+      }
+      tickGame(st);
+    }
+  }
+  assert.ok(waits > 50, `the crew waited ${waits} times: enough to tell`);
 });
 
 test('undo, a saved attempt and every send give back exactly the cubes that can be hit', () => {

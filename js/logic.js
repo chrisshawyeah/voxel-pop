@@ -417,7 +417,7 @@ function lineFrom(st, i, qx, qy, qz, vx, vy, vz) {
 // Cube i can be seen from the camera now: the quick check, or the middle of one of its faces on the
 // outside air, turned to the camera, has a clear line to it.
 export function seen(st, i) {
-  return st.cells[i] > 0 && (plainView(st, i, sideMask(st)) || faceView(st, i));
+  return st.cells[i] > 0 && (plainView(st, i, sideMask(st)) || faceView(st, i) || shows(st, i));
 }
 
 // The faces of cube i on the outside air (its neighbour that way is outside the grid or outside
@@ -487,6 +487,46 @@ function faceView(st, i) {
     }
   }
   st.fN[i] = k;
+  return false;
+}
+
+// The last look, for a cube that fails both checks above but still shows a good part of itself on
+// the screen (Chris, November 26th: yellow cubes in plain view on the bath duck that no yellow crew
+// would hit): how much of it shows, as a share of one whole face seen square on, the way a picture
+// of the screen counts it (tools/sight.mjs). A face turned to the camera with at least one of its
+// FACE_POINTS clear is looked at again on a finer grid of SHOW_GRID x SHOW_GRID points, and the
+// share of them clear, times how squarely the face is turned to the camera, is what shows of it
+// (a face turned far from the camera adds little, but two of them on a corner add up);
+// the faces add up. A cube showing SHOW_MIN or more can be hit. A face with none of the five points
+// clear shows at most a thin strip along an edge, and is not looked at again.
+const SHOW_GRID = 4, SHOW_MIN = 0.25, SHOW_FACING = 0.1; // a face turned up to about 84 degrees away still adds what shows of it
+function shows(st, i) {
+  const open = openFaces(st, i);
+  if (!open) return false;
+  const C = camPos(st), { sx, sy } = st;
+  const cx = (i % sx) + 0.5, cy = (Math.floor(i / sx) % sy) + 0.5, cz = Math.floor(i / (sx * sy)) + 0.5;
+  const clearAt = (px, py, pz) => {
+    const wx = C[0] - px, wy = C[1] - py, wz = C[2] - pz, L = Math.hypot(wx, wy, wz);
+    return lineFrom(st, i, px, py, pz, wx / L, wy / L, wz / L) === -1;
+  };
+  let share = 0;
+  for (let f = 0; f < 6; f++) {
+    if (!(open & (1 << f))) continue;
+    const n = FACE_N[f];
+    const fx = cx + n[0] * 0.5, fy = cy + n[1] * 0.5, fz = cz + n[2] * 0.5;
+    const ox = C[0] - fx, oy = C[1] - fy, oz = C[2] - fz, od = Math.hypot(ox, oy, oz);
+    const facing = (n[0] * ox + n[1] * oy + n[2] * oz) / od;
+    if (facing <= SHOW_FACING) continue;
+    const ax = n[0] ? 0 : n[1] ? 1 : 2; // the face's edges run along the other two axes
+    const at = (a, b) => [fx + (ax === 1 ? b : ax === 2 ? a : 0), fy + (ax === 2 ? b : ax === 0 ? a : 0), fz + (ax === 0 ? b : ax === 1 ? a : 0)];
+    if (!FACE_POINTS.some(([a, b]) => clearAt(...at(a, b)))) continue;
+    let clear = 0;
+    for (let u = 0; u < SHOW_GRID; u++) {
+      for (let v = 0; v < SHOW_GRID; v++) if (clearAt(...at((u + 0.5) / SHOW_GRID - 0.5, (v + 0.5) / SHOW_GRID - 0.5))) clear++;
+    }
+    share += (clear / (SHOW_GRID * SHOW_GRID)) * facing;
+    if (share >= SHOW_MIN) return true;
+  }
   return false;
 }
 
@@ -586,6 +626,12 @@ function aim(st, c) {
   for (let k = 0; k < list.length; k++) {
     const i = list[k];
     if (set.has(i) && faceView(st, i)) return i;
+  }
+  // Last, a cube that shows a good part of itself though fewer than two of a face's five points
+  // are clear: half under an overhang, or seen into a notch at a slant (shows()).
+  for (let k = 0; k < list.length; k++) {
+    const i = list[k];
+    if (set.has(i) && shows(st, i)) return i;
   }
   return -1;
 }

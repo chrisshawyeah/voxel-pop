@@ -19,6 +19,12 @@
 //                                         leaves the level won with at least as many trap moments,
 //                                         until one to three moments have a trap; then prints it
 //                                         as `lines`, measured, like search --measure
+//   node tools/traps.mjs design --level=6 [--seed=1 --steps=200]
+//                                         the same, starting from level 6's own lines; with
+//                                         --tune it keeps going until rushing (the hasty greedy
+//                                         player) wins no more than 6 points above waiting and the
+//                                         greedy player is inside the level's band, by quick
+//                                         looks of 120 plays each, keeping one to three moments
 //
 // A trap [k, j]: after the first k sends of the solution (each followed by waiting until the pads
 // stop, as the planning player plays), sending line j instead loses whatever comes after, and
@@ -27,7 +33,7 @@
 import { pathToFileURL } from 'node:url';
 import { LEVELS, buildLevel, dealLevel, modelFor, rng } from '../js/levels.js';
 import { cloneBoard, deploy, settle, revealLone } from '../js/logic.js';
-import { plan, lineHolds, firingTime, greedyCheck, hastyCheck, forecastCheck, backtrackCheck } from './players.mjs';
+import { plan, lineHolds, firingTime, greedyCheck, hastyCheck, forecastCheck, backtrackCheck, greedyRate, hastyRate } from './players.mjs';
 
 const BUDGET = 30000;
 
@@ -139,14 +145,16 @@ if (cmd === 'check') {
     console.log(JSON.stringify(out));
   }
 } else if (cmd === 'design') {
-  const def = {
+  const level = arg && arg.startsWith('--level=') ? Number(arg.slice(8)) - 1 : (opt('level', null) === null ? -1 : Number(opt('level')) - 1);
+  const tune = rest.includes('--tune') || arg === '--tune';
+  const def = level >= 0 ? LEVELS[level] : {
     name: arg, model: arg, cols: Number(opt('cols', 3)), pads: Number(opt('pads', 3)),
     crew: opt('crew', '60,100').split(',').map(Number), hidden: Number(opt('hidden', 0)),
     mix: Number(opt('mix', 0.1)), flip: Number(opt('flip', 0.8)), deal: Number(opt('deal', 0)),
   };
   const rand = rng(Number(opt('seed', 1))), steps = Number(opt('steps', 200));
   const names = modelFor(def).names;
-  const L0 = dealLevel(def);
+  const L0 = level >= 0 ? buildLevel(level) : dealLevel(def);
   // The lines as plain crew, and the board they make.
   let cols = L0.board.columns.map(col => col.map(s => ({ color: s.color, count: s.count, hidden: s.hidden })));
   const boardOf = cs => {
@@ -178,10 +186,21 @@ if (cmd === 'check') {
       }
     }
     const moments = new Set(traps.map(t => t[0])).size;
-    return { score: (moments > 3 ? 3 - moments / 10 : moments) * 10 + near, moments, traps, line: p.line, st };
+    const r = { score: (moments > 3 ? 3 - moments / 10 : moments) * 10 + near, moments, traps, line: p.line, st };
+    // Tuning: with its moments in place, a change is judged by how far rushing wins above waiting
+    // and the greedy player sits outside the level's band (quick looks; the full measures follow).
+    if (tune && moments >= 1 && moments <= 3) {
+      const g = greedyRate(st, rng(1777), 120), h = hastyRate(st, rng(1778), 120);
+      const [lo, hi] = def.greedy || [0, 100];
+      r.miss = Math.max(0, h - g - 6) + Math.max(0, lo + 3 - g) + Math.max(0, g - hi + 3);
+      r.score = 40 - r.miss;
+      r.quick = { greedy: g, hasty: h };
+    }
+    return r;
   };
+  const settled = b => b.moments >= 1 && b.moments <= 3 && (!tune || b.miss === 0);
   let best = judge(cols);
-  for (let step = 0; step < steps && !(best.moments >= 1 && best.moments <= 3); step++) {
+  for (let step = 0; step < steps && !settled(best); step++) {
     const next = cols.map(col => col.map(s => ({ ...s })));
     const at = () => { const ci = Math.floor(rand() * next.length); return [ci, Math.floor(rand() * next[ci].length)]; };
     const [a, i] = at(), [b, j] = at();
@@ -189,9 +208,9 @@ if (cmd === 'check') {
     else { const [s] = next[a].splice(i, 1); next[b].splice(Math.floor(rand() * (next[b].length + 1)), 0, s); } // one moves to another place
     if (!playable(next) || JSON.stringify(next) === JSON.stringify(cols)) continue;
     const r = judge(next);
-    if (r.score >= best.score) { cols = next; best = r; console.log(JSON.stringify({ step, moments: r.moments, score: r.score })); }
+    if (r.score >= best.score) { cols = next; best = r; console.log(JSON.stringify({ step, moments: r.moments, score: r.score, quick: r.quick })); }
   }
-  if (!(best.moments >= 1 && best.moments <= 3)) { console.log(JSON.stringify({ done: false, moments: best.moments })); process.exit(1); }
+  if (!settled(best)) { console.log(JSON.stringify({ done: false, moments: best.moments, quick: best.quick })); process.exit(1); }
   const st = best.st;
   const holds = lineHolds(st, best.line), fire = firingTime(st, best.line);
   // Done only for a line the level tests take: it holds with the sends overlapping, and fires within 30 s.
