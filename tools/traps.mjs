@@ -27,7 +27,9 @@
 //                                         looks of 120 plays each, then until the forecast
 //                                         follower is inside the level's follow band and the
 //                                         backtracking player's median undos are at most the
-//                                         level's (or --undos), keeping one to three moments
+//                                         level's (or --undos), keeping one to three moments;
+//                                         done only when the full measures pass as the level tests
+//                                         want them, or it prints done: false and the misses
 //
 // A trap [k, j]: after the first k sends of the solution (each followed by waiting until the pads
 // stop, as the planning player plays), sending line j instead loses whatever comes after, and
@@ -35,6 +37,7 @@
 // look with every hidden crew member known, so a trap loses even for a player who could see them.
 import { pathToFileURL } from 'node:url';
 import { LEVELS, buildLevel, dealLevel, modelFor, rng } from '../js/levels.js';
+import { MODELS } from '../js/models.js';
 import { cloneBoard, deploy, settle, revealLone } from '../js/logic.js';
 import { plan, lineHolds, firingTime, greedyCheck, hastyCheck, forecastCheck, backtrackCheck, greedyRate, hastyRate } from './players.mjs';
 
@@ -109,6 +112,9 @@ const main = process.argv[1] && import.meta.url === pathToFileURL(process.argv[1
 const args = main ? process.argv.slice(2) : [];
 const [cmd, arg] = args.filter(x => !x.startsWith('--'));
 const opt = (name, dflt) => { const a = args.find(x => x.startsWith(`--${name}=`)); return a ? a.slice(name.length + 3) : dflt; };
+// A level by its number (its index from 0), or a sculpture by its name; one that does not exist is refused by name.
+const levelAt = s => { const n = Number(s) - 1; if (!LEVELS[n]) throw new Error(`there is no level ${s}: the levels are 1 to ${LEVELS.length}`); return n; };
+const sculptureNamed = s => { if (!Object.hasOwn(MODELS, s)) throw new Error(`there is no sculpture ${s}: the sculptures are ${Object.keys(MODELS).join(', ')}`); return s; };
 if (cmd === 'check') {
   let bad = 0;
   LEVELS.forEach((def, n) => {
@@ -119,12 +125,12 @@ if (cmd === 'check') {
   });
   process.exitCode = bad ? 1 : 0;
 } else if (cmd === 'find') {
-  const n = Number(arg) - 1, L = buildLevel(n);
+  const n = levelAt(arg), L = buildLevel(n);
   const line = L.def.solution || plan(L.board).line;
   console.log(JSON.stringify({ level: n + 1, solution: line, traps: line ? findTraps(L.board, line) : null }));
 } else if (cmd === 'search') {
   const def = {
-    name: arg, model: arg, cols: Number(opt('cols', 4)), pads: Number(opt('pads', 4)),
+    name: arg, model: sculptureNamed(arg), cols: Number(opt('cols', 4)), pads: Number(opt('pads', 4)),
     crew: opt('crew', '40,70').split(',').map(Number), hidden: Number(opt('hidden', 0)),
     mix: Number(opt('mix', 0.2)), flip: Number(opt('flip', 0.6)),
   };
@@ -150,11 +156,10 @@ if (cmd === 'check') {
     console.log(JSON.stringify(out));
   }
 } else if (cmd === 'design') {
-  const level = opt('level', null) === null ? -1 : Number(opt('level')) - 1;
-  if (opt('level', null) !== null && !LEVELS[level]) throw new Error(`there is no level ${opt('level')}: the levels are 1 to ${LEVELS.length}`);
+  const level = opt('level', null) === null ? -1 : levelAt(opt('level'));
   const tune = args.includes('--tune');
   const def = level >= 0 ? LEVELS[level] : {
-    name: arg, model: arg, cols: Number(opt('cols', 3)), pads: Number(opt('pads', 3)),
+    name: arg, model: sculptureNamed(arg), cols: Number(opt('cols', 3)), pads: Number(opt('pads', 3)),
     crew: opt('crew', '60,100').split(',').map(Number), hidden: Number(opt('hidden', 0)),
     mix: Number(opt('mix', 0.1)), flip: Number(opt('flip', 0.8)), deal: Number(opt('deal', 0)),
   };
@@ -196,27 +201,31 @@ if (cmd === 'check') {
     const r = { score: (moments > 3 ? 3 - moments / 10 : moments) * 10 + near, moments, traps, line: p.line, st };
     // Tuning: with its moments in place, a change is judged by how far rushing wins above waiting
     // and the greedy player sits outside the level's band (quick looks; the full measures follow),
-    // 3 points inside it except at 0 or 100, as tools/pick-deals.mjs keeps it. With those in place,
-    // a level's forecast follower is judged against its follow band (2 points inside it except at 0
-    // or 100), and then the backtracking player's median undos against the level's `undos`, or
+    // 3 points inside it except at 0 or 100, as tools/pick-deals.mjs keeps it; and a win every time
+    // misses where the level tests want a loss sometimes (greedy from level 4, rushing from level 2,
+    // as tools/pick-deals.mjs refuses rushing at 100). With those in place, a level's forecast
+    // follower is judged against its follow band (2 points inside it except at 0 or 100), and
+    // then the backtracking player's median undos against the level's `undos`, or
     // --undos= when the curve needs fewer; both by the level tests' own measures. Each stage counts
     // only once the one before it is met, and a miss counts a ten-thousandth of a point, so a board
     // with its moments in place still ranks above every board without them.
-    // A line that does not hold, or takes over 30 s to fire, misses most of all.
-    if (tune && moments >= 1 && moments <= 3 && (!p.holds || !(firingTime(st, p.line) <= 30))) r.score = 40 - 0.3;
+    // A line that does not hold, or takes over 30 s to fire, misses most of all. The firing time and
+    // the follower's and undo player's measures are kept on the result, for the end not to run them again.
+    if (tune && moments >= 1 && moments <= 3 && (!p.holds || !((r.fire = firingTime(st, p.line)) <= 30))) r.score = 40 - 0.3;
     else if (tune && moments >= 1 && moments <= 3) {
       const g = greedyRate(st, rng(1777), 120), h = hastyRate(st, rng(1778), 120);
       const [lo, hi] = def.greedy || [0, 100];
       r.quick = { greedy: g, hasty: h };
-      r.miss = Math.max(0, h - g - 6) + (lo > 0 ? Math.max(0, lo + 3 - g) : 0) + (hi < 100 ? Math.max(0, g - hi + 3) : 0);
+      r.miss = Math.max(0, h - g - 6) + (lo > 0 ? Math.max(0, lo + 3 - g) : 0) + (hi < 100 ? Math.max(0, g - hi + 3) : 0)
+        + (level >= 3 ? Math.max(0, g - 99) : 0) + (level >= 1 ? Math.max(0, h - 99) : 0);
       if (def.follow) {
         if (r.miss) r.miss += 2000;
         else {
-          const f = r.quick.follow = forecastCheck(st).rate, [flo, fhi] = def.follow;
+          const f = r.quick.follow = (r.fc = forecastCheck(st)).rate, [flo, fhi] = def.follow;
           r.miss = (flo > 0 ? Math.max(0, flo + 2 - f) : 0) + (fhi < 100 ? Math.max(0, f - fhi + 2) : 0);
           if (r.miss) r.miss += 1000;
           else {
-            const u = r.quick.undos = backtrackCheck(st).undos;
+            const u = r.quick.undos = (r.back = backtrackCheck(st)).undos;
             r.miss = u === null ? 100 : Math.max(0, u - Number(opt('undos', def.undos)));
           }
         }
@@ -239,10 +248,24 @@ if (cmd === 'check') {
   }
   if (!settled(best)) { console.log(JSON.stringify({ done: false, moments: best.moments, quick: best.quick })); process.exit(1); }
   const st = best.st;
-  const holds = lineHolds(st, best.line), fire = firingTime(st, best.line);
+  // Tuning settles only on a line that holds and fires within 30 s, and on a level with its follower
+  // and undos measured, all on this board with fixed seeds as it was judged: those are not run again.
+  const holds = tune || lineHolds(st, best.line), fire = tune ? best.fire : firingTime(st, best.line);
   // Done only for a line the level tests take: it holds with the sends overlapping, and fires within 30 s.
   if (!holds || !(fire <= 30)) { console.log(JSON.stringify({ done: false, moments: best.moments, holds, fire })); process.exit(1); }
-  const fc = forecastCheck(st), back = backtrackCheck(st);
-  console.log(JSON.stringify({ done: true, moments: best.moments, traps: best.traps, solution: best.line, lines: linesOf(st, names), pads: def.pads, crew: st.columns.flat().length, holds, fire,
-    greedy: greedyCheck(st), hasty: hastyCheck(st), follow: fc.rate, undos: back.undos, backRate: back.rate }));
+  const fc = best.fc ?? forecastCheck(st), back = best.back ?? backtrackCheck(st), greedy = greedyCheck(st), hasty = hastyCheck(st);
+  // Tuned, done only when the full measures pass the level tests too, which the quick looks only estimate.
+  const [lo, hi] = def.greedy || [0, 100], undos = Number(opt('undos', def.undos));
+  const misses = !tune ? [] : [
+    (greedy < lo || greedy > hi) && `greedy wins ${greedy}%, outside ${lo}-${hi}%`,
+    level >= 3 && greedy === 100 && 'greedy wins every time',
+    hasty > greedy + 10 && `rushing wins ${hasty}%, more than 10 points over waiting`,
+    level >= 1 && hasty === 100 && 'rushing wins every time',
+    def.follow && (fc.rate < def.follow[0] || fc.rate > def.follow[1]) && `the forecast follower wins ${fc.rate}%, outside ${def.follow.join('-')}%`,
+    def.follow && (back.undos === null || back.undos > undos) && `the backtracking player's median is ${back.undos ?? 'no win'} undos, more than ${undos}`,
+    back.rate < fc.rate && 'undo makes the forecast follower worse',
+  ].filter(Boolean);
+  console.log(JSON.stringify({ done: !misses.length, ...misses.length && { misses }, moments: best.moments, traps: best.traps, solution: best.line, lines: linesOf(st, names), pads: def.pads, crew: st.columns.flat().length, holds, fire,
+    greedy, hasty, follow: fc.rate, undos: back.undos, backRate: back.rate }));
+  if (misses.length) process.exit(1);
 }

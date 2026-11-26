@@ -736,31 +736,30 @@ function* heights(st, by) {
 // The nearest view, [turn, height], from which an open face of a cube the crew wait for shows
 // with `need` of its points in clear sight, or, for `need` 0, from which the cube shows SHOW_MIN of
 // itself (shows()); null when none does. Every other height is tried, nearest first, and at each
-// every other step of the turn, nearest first, for SWING_CUBES of each colour's cubes. A search
-// that found nothing finds nothing again while the board and the crew waiting stay the same, so
-// that answer is kept.
+// every other step of the turn, nearest first, either way round, for SWING_CUBES of each colour's
+// cubes.
 function viewShowing(st, need) {
-  const miss = `${need} ${st.rev} ${st.slots.map(s => (s && s.count > 0 && !(s.land > 0) ? s.color : -1)).join()}`;
-  if (st.swingMiss === miss) return null;
   const faces = waitedFaces(st, SWING_CUBES);
   const here = Math.floor(st.yaw / VIEW_STEP), n = YAW_STEPS / VIEW_STEP;
   for (const u of faces.length ? heights(st, SWING_STEP) : []) {
-    for (let k = 0; k < n; k += SWING_STEP) {
-      const y = (((here + (k % 2 ? (k + 1) / 2 : -k / 2)) % n + n) % n) * VIEW_STEP + VIEW_STEP / 2;
+    for (let k = 0; k < n / SWING_STEP; k++) {
+      const y = (((here + (k % 2 ? (k + 1) / 2 : -k / 2) * SWING_STEP) % n + n) % n) * VIEW_STEP + VIEW_STEP / 2;
       const C = camAt(st, y, u);
       for (let q = 0; q < faces.length; q += 2) if (need ? faceShows(st, faces[q], faces[q + 1], C, need) : faces[q] !== faces[q - 2] && showsAt(st, faces[q], openFaces(st, faces[q]), C, false)) return [y, u];
     }
   }
-  st.swingMiss = miss;
   return null;
 }
 // Crew have waited SEEK ticks with nothing of theirs in view: the camera swings to the nearest view
 // that shows a fair part of a cube they wait for (FACE_NEED of a face's points, else a quarter of a
 // face, shows()), else to one that shows a sliver (and a sliver will do, faceView()); when none
 // shows from anywhere, the view stays as it is. The view then holds still for FLIGHT ticks
-// (st.hold), so the cube still shows when the shot lands.
+// (st.hold), so the cube still shows when the shot lands. A search that found nothing finds
+// nothing again while the board and the crew waiting stay the same, so that answer is kept.
 function swing(st) {
   for (const s of st.slots) if (s && s.count > 0 && !(s.land > 0) && target(st, s.color) >= 0) return;
+  const miss = `${st.rev} ${st.slots.map(s => (s && s.count > 0 && !(s.land > 0) ? s.color : -1)).join()}`;
+  if (st.swingMiss === miss) return;
   for (const need of [FACE_NEED, 0, 1]) {
     const v = viewShowing(st, need);
     if (!v) continue;
@@ -768,6 +767,7 @@ function swing(st) {
     if (need === 1) st.sliver = true;
     return;
   }
+  st.swingMiss = miss;
 }
 
 // One tick: the sculpture turns by st.spin, the shots due now land (in the order they left), crew
@@ -779,7 +779,7 @@ export function step(st) {
   else {
     st.yaw = turned(st.yaw, st.spin);
     if (st.spin) { // turning on its own: the camera looks for what the crew wait for (SEEK)
-      if (st.quiet === SEEK) swing(st);
+      if (st.quiet >= SEEK) swing(st);
       const want = st.seekH >= 0 ? st.seekH : st.home;
       if (st.tick % SEEK_STEP === 0) st.pitch += Math.sign(want - st.pitch) * Math.min(SEEK_JUMP, Math.abs(want - st.pitch));
     }
@@ -868,10 +868,12 @@ export function advance(st, tick) {
 }
 
 // Sets the view (see the top of this file) on a board; false when it is no view at all. The pitch
-// set is the one the camera comes back to after looking around (st.home).
+// set is the one the camera comes back to after looking around (st.home). Held still (spin 0),
+// the player has the view: the height an earlier swing went to is forgotten (st.seekH).
 export function setView(st, yaw, pitch, spin) {
   if (![yaw, pitch, spin].every(Number.isSafeInteger) || yaw < 0 || yaw >= YAW_STEPS || pitch < 0 || pitch >= PITCH_STEPS || spin < 0 || spin > MAX_SPIN) return false;
   st.yaw = yaw; st.pitch = pitch; st.spin = spin; st.home = pitch;
+  if (!spin) st.seekH = -2;
   return true;
 }
 

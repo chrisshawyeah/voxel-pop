@@ -6,7 +6,7 @@ import { join } from 'node:path';
 import { spawnSync } from 'node:child_process';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { makeBoard, cloneBoard, removeCube, deploy, fire, step, settle, launch, target, isJammed, isWon, canFire, canReach, purgeCleared, isExposed, freeSlot, FLIGHT, tickGame, advance, forecast, forecastKey, fates, busy, revealLone, checkOf, pace, Attempt, FAST,
-  setView, seen, camPos, lookAt, pitchUnits, pitchRad, yawRad, camBack, YAW_STEPS, START_YAW, START_PITCH, PITCH_STEPS, TURN, SEEK, STALL } from '../js/logic.js';
+  setView, seen, camPos, lookAt, pitchUnits, pitchRad, YAW_STEPS, START_YAW, START_PITCH, PITCH_STEPS, TURN, SEEK, STALL } from '../js/logic.js';
 import { pixels, facePixels } from '../tools/sight.mjs';
 import { checkTraps, findTraps } from '../tools/traps.mjs';
 import { LEVELS, buildLevel, dealLevel, levelPrint, levelShape, rng } from '../js/levels.js';
@@ -575,8 +575,7 @@ test('a crew member never waits while a good part of a cube of its colour shows 
       const situation = `${play} ${st.rev} ${st.yaw} ${st.pitch} ${waiting.map(s => s.color).sort()}`;
       if (waiting.length && !looked.has(situation)) {
         looked.add(situation);
-        const p = pitchRad(st.pitch), a = yawRad(st.yaw), at = lookAt(st), d = camBack(FOV, ASP, st.topY, st.reachR, p);
-        const cam = [at[0] - Math.cos(p) * d * Math.sin(a), at[1] + Math.sin(p) * d, at[2] + Math.cos(p) * d * Math.cos(a)];
+        const cam = camPos(st), at = lookAt(st);
         const px = pixels(st, cam, at, FOV, ASP, W, H), full = facePixels(cam, at, FOV, H);
         for (const s of waiting) for (const i of st.exposed[s.color]) {
           const share = (px.get(i) || 0) / full;
@@ -1191,10 +1190,22 @@ test('traps.mjs design reads a flag that comes before the model, and refuses a l
 });
 
 test('traps.mjs design --tune keeps no margin at a band edge of 0 or 100, as tools/pick-deals.mjs does', () => {
-  // The atom's deal 15 has three trap moments and a quick greedy look of 0, inside the band [0, 100] a
-  // dealt sculpture has: tuning is done at once, and the full checks follow (holds and fire, not quick).
-  const r = spawnSync(process.execPath, ['tools/traps.mjs', 'design', 'atom', '--crew=30,50', '--deal=15', '--tune', '--steps=0'], { cwd: fileURLToPath(new URL('..', import.meta.url)), encoding: 'utf8' });
-  const out = JSON.parse(r.stdout.trim().split('\n').at(-1));
-  assert.equal(out.moments, 3, r.stdout);
-  assert.ok('holds' in out && !('quick' in out), r.stdout);
+  // The atom's deal 15 has three trap moments and a quick greedy look of 0, and the fish's deal 13 on four
+  // lines one trap moment and a quick greedy look of 99, inside the band [0, 100] a dealt sculpture has:
+  // a margin of 3 points at either edge would count them as misses, and with --steps=0 stop them undone.
+  // Tuning is done at once, and the full checks follow (holds and fire, not quick) and pass.
+  const design = args => spawnSync(process.execPath, ['tools/traps.mjs', 'design', ...args, '--tune', '--steps=0'], { cwd: fileURLToPath(new URL('..', import.meta.url)), encoding: 'utf8' });
+  for (const [args, moments] of [[['atom', '--crew=30,50', '--deal=15'], 3], [['fish', '--cols=4', '--crew=30,50', '--deal=13'], 1]]) {
+    const r = design(args);
+    const out = JSON.parse(r.stdout.trim().split('\n').at(-1));
+    assert.equal(r.status, 0, r.stdout + r.stderr);
+    assert.equal(out.done, true, r.stdout);
+    assert.equal(out.moments, moments, r.stdout);
+    assert.ok('holds' in out && !('quick' in out), r.stdout);
+  }
+  // And --tune is what judged them: the globe's deal 5, whose winning line does not hold, it refuses at
+  // once, before the full checks (without --tune those run, as in the test above, and print holds: false).
+  const r = design(['globe', '--cols=3', '--pads=3', '--crew=70,110', '--deal=5']);
+  assert.equal(r.status, 1, r.stderr);
+  assert.deepEqual(JSON.parse(r.stdout.trim().split('\n').at(-1)), { done: false, moments: 1 });
 });
