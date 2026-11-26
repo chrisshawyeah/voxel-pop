@@ -198,7 +198,7 @@ before it, except a level whose band sits wholly above the one before (the breat
 undos stay at most 3 up to level 12 and at most 6 after, and from one level to the next rise by at
 most 4 and fall by at most 1 (the breather left out). The median jumps from 0 to a level's full
 depth once the follower wins less than half the time, which is why one level may rise by 3 at once
-(the hourglass, level 15, at 3; then 4 and 5).
+(the hourglass, level 16, at 3; then 4 and 5).
 `curveMisses()` in `tools/players.mjs` checks it all; the tests and the deal picker both use it.
 
 Since a crew member can hit its colour from any side, a colour all on the outside never makes
@@ -213,7 +213,7 @@ its stripe.
 
 Levels 4 to 20 are seventeen floating sculptures with cages, windows and overhangs (the beehive,
 Ferris wheel, carousel, treasure chest, globe, treehouse, teapot, birdcage, submarine, jellyfish,
-space station, hourglass, windmill, pagoda, airship, lantern and atom), and each is built around
+space station, windmill, hourglass, pagoda, airship, lantern and atom), and each is built around
 planned hard moments. Its crew are written out by
 hand (`lines` in `js/levels.js`), with a winning order of sends (`solution`) and its `traps`: one
 to three moments along that order where sending another line, whose front crew member looks ready
