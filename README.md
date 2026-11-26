@@ -5,8 +5,10 @@ crew member of a line to send it up to a launch pad, where it pops cubes of its 
 its number runs out. A crew member hits only cubes you can see: a cube with a face on the open
 air around the sculpture, turned to the camera, with no other cube
 between some part of that face and the camera, whether straight on, at a slant into a notch, under
-a part that sticks out, or from below. The cubes stand flush, so nothing behind them shows
-through. The sculpture floats in the air, with nothing under it, and turns, so its sides come
+a part that sticks out, or from below. Any cube that shows at least a quarter of a face's worth on
+the screen can be hit, and a crew member never waits while one of its colour shows that much (the
+tests check it against a picture of a phone's screen). The cubes stand flush, so nothing behind
+them shows through. The sculpture floats in the air, with nothing under it, and turns, so its sides come
 round in turn and its underside can be hit when you look from below; drag it to turn it
 yourself, and drag up or down to tilt the camera, from below it to almost straight
 down. Crew who have waited a while with nothing of theirs in
@@ -196,7 +198,7 @@ before it, except a level whose band sits wholly above the one before (the breat
 undos stay at most 3 up to level 12 and at most 6 after, and from one level to the next rise by at
 most 4 and fall by at most 1 (the breather left out). The median jumps from 0 to a level's full
 depth once the follower wins less than half the time, which is why one level may rise by 3 at once
-(the hourglass, level 14, at 3; then 4 and 5).
+(the hourglass, level 15, at 3; then 4 and 5).
 `curveMisses()` in `tools/players.mjs` checks it all; the tests and the deal picker both use it.
 
 Since a crew member can hit its colour from any side, a colour all on the outside never makes
@@ -211,7 +213,7 @@ its stripe.
 
 Levels 4 to 20 are seventeen floating sculptures with cages, windows and overhangs (the beehive,
 Ferris wheel, carousel, treasure chest, globe, treehouse, teapot, birdcage, submarine, jellyfish,
-hourglass, space station, windmill, pagoda, airship, lantern and atom), and each is built around
+space station, hourglass, windmill, pagoda, airship, lantern and atom), and each is built around
 planned hard moments. Its crew are written out by
 hand (`lines` in `js/levels.js`), with a winning order of sends (`solution`) and its `traps`: one
 to three moments along that order where sending another line, whose front crew member looks ready
