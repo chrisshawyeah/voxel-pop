@@ -152,9 +152,12 @@ button:focus-visible { outline: 3px solid var(--ink); outline-offset: 2px; }
 .crew .eyes i::after {
   content: ""; position: absolute; width: 6px; height: 7px; border-radius: 50%; background: #1b1d2b; left: 3px; top: 1px;
 }
+/* The number sits on a small dark tag: white on it reads on every crew colour, where a white number with an
+   outline on a yellow, white or green crew member read under the 4.5 to 1 the contrast check asks for (17nov). */
 .crew .n {
-  position: absolute; left: 0; right: 0; bottom: 8px; text-align: center; font-size: 21px; font-weight: 900; color: #fff;
-  -webkit-text-stroke: 4px rgba(20, 22, 40, 0.75); paint-order: stroke fill; letter-spacing: -0.5px;
+  position: absolute; left: 50%; bottom: 8px; transform: translateX(-50%); min-width: 1.5em; padding: 0 5px;
+  border-radius: 9px; line-height: 1.2; background: #262a45; text-align: center; font-size: 21px; font-weight: 900;
+  color: #fff; letter-spacing: -0.5px; white-space: nowrap;
 }
 .crew.egg .body {
   background:
@@ -227,8 +230,15 @@ button:focus-visible { outline: 3px solid var(--ink); outline-offset: 2px; }
 .col { position: relative; width: var(--crew); }
 .col .slot { position: absolute; left: 0; padding: 0; transform-origin: 50% 0; }
 .col .s1 { top: 0; z-index: 3; }
-.col .s2 { top: var(--row2); z-index: 2; transform: scale(0.82); filter: saturate(0.75) brightness(0.97); opacity: 0.85; }
-.col .s3 { top: var(--row3); z-index: 1; transform: scale(0.66); filter: saturate(0.55) brightness(0.95); opacity: 0.6; }
+.col .s2 { top: var(--row2); z-index: 2; transform: scale(0.82); }
+.col .s3 { top: var(--row3); z-index: 1; transform: scale(0.66); }
+/* The crew behind the front stand back: a veil of the sky over the body and eyes makes them paler and
+   greyer, as fading the whole crew member did, but their numbers stay above it at full strength, as
+   readable as the front's (17nov: faded with the rest, they failed the contrast check). */
+.col .s2 .body::after, .col .s3 .body::after { content: ""; position: absolute; inset: 0; border-radius: inherit; pointer-events: none; }
+.col .s2 .body::after { background: rgba(169, 214, 255, 0.15); -webkit-backdrop-filter: saturate(0.75) brightness(0.97); backdrop-filter: saturate(0.75) brightness(0.97); }
+.col .s3 .body::after { background: rgba(169, 214, 255, 0.4); -webkit-backdrop-filter: saturate(0.55) brightness(0.95); backdrop-filter: saturate(0.55) brightness(0.95); }
+.col .s2 .n, .col .s3 .n { z-index: 1; }
 .col .front { border-radius: 18px; }
 .col .front::before { content: ""; position: absolute; inset: -4px -6px -2px; border-radius: 18px; } /* a bigger place to tap */
 .col .front:active .crew { transform: scale(0.94); }
@@ -260,7 +270,7 @@ button:focus-visible { outline: 3px solid var(--ink); outline-offset: 2px; }
 .crew.mini .eyes { gap: 6px; }
 .crew.mini .eyes i { width: 8px; height: 10px; }
 .crew.mini .eyes i::after { width: 4px; height: 5px; left: 2px; }
-.crew.mini .n { bottom: 5px; font-size: 16px; -webkit-text-stroke-width: 3px; }
+.crew.mini .n { bottom: 5px; font-size: 16px; }
 .crew.mini.egg .n { bottom: 8px; font-size: 19px; }
 .preview .pool { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; margin: 6px 0 2px; font-size: 13px; font-weight: 800; color: var(--ink-soft); }
 .preview .pool span { display: flex; flex-wrap: wrap; gap: 4px; }
@@ -312,7 +322,7 @@ button:focus-visible { outline: 3px solid var(--ink); outline-offset: 2px; }
   .crew .eyes { gap: 6px; }
   .crew .eyes i { width: 8px; height: 10px; }
   .crew .eyes i::after { width: 4px; height: 5px; left: 2px; }
-  .crew .n { bottom: 6px; font-size: 17px; -webkit-text-stroke-width: 3px; }
+  .crew .n { bottom: 6px; font-size: 17px; }
   .crew.egg .n { bottom: 8px; font-size: 20px; }
 }
 @media (prefers-reduced-motion: reduce) {
