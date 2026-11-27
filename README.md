@@ -158,6 +158,7 @@ No build step and nothing to install. Every file is plain JavaScript the browser
 | The look of the crew, pads, top bar and short-window layout | `css/game.css` |
 | Sounds | `js/audio.js` (every sound is made in code). Ordinary pops are soft and at most about 9 a second (`POP_GAP`); the bright rising notes are for a crew member finishing, a colour cleared and a win. |
 | The 3D look: cubes, lights, camera framing, chips, puffs, the build at a level's start | `js/render.js` |
+| What shows first: on a slow connection the pads and crew are drawn before the 3D library (three.js, most of the download) arrives, with an outline where the sculpture will stand; a tap sends nobody and the rules wait until it is drawn | `loadStage()` and the stand-in `stage` in `js/main.js`, `.loading` in `css/game.css`, the `modulepreload` list in `index.html` |
 | Turning and tilting by hand | the view section of `js/main.js` (`TURN_PX`, `TILT_PX`, `FLING`, `REST`); the sculpture's own turn, the camera's range and how long crew wait before the camera looks around are `TURN`, `PITCH_MIN`/`PITCH_MAX`, `SEEK`, `LOOK` and `STALL` in `js/logic.js` |
 
 To try a change on your own computer, serve the folder and open it (the page loads modules,
