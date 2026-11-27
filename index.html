@@ -18,10 +18,8 @@
 <link rel="stylesheet" href="css/game.css">
 <style>html,body{background:#a9d6ff;color:#1f2547}</style>
 <script type="importmap">{ "imports": { "three": "./vendor/three.module.js" } }</script>
-<!-- fetch every script at once instead of one after another -->
-<link rel="modulepreload" href="vendor/three.module.js">
-<link rel="modulepreload" href="vendor/three.core.js">
-<link rel="modulepreload" href="js/render.js">
+<!-- fetch the first screen's scripts at once instead of one after another; the 3D library (js/render.js
+     and the two files of three.js in vendor) is fetched after them, once the pads and crew are drawn (js/main.js) -->
 <link rel="modulepreload" href="js/fx.js">
 <link rel="modulepreload" href="js/audio.js">
 <link rel="modulepreload" href="js/levels.js">
@@ -69,7 +67,7 @@
   </script>
   <main class="stage" id="stage">
     <canvas id="gl"></canvas>
-    <div class="loading" id="loading"><span class="cubes"><i></i><i></i><i></i></span><b>Building the level</b></div>
+    <div class="loading" id="loading"><div class="shape"><span class="cubes"><i></i><i></i><i></i></span><b id="loading-words">Building the sculpture</b></div></div>
     <div class="hint" id="hint" role="status" hidden></div>
     <div class="banner" id="banner" role="status" hidden></div>
     <div class="ending" id="ending" role="status" hidden><b id="ending-title">All levels cleared</b><span id="ending-sub">Tap to play again</span></div>

@@ -5,7 +5,6 @@
 // The undo button takes back a send at any time, the arrows move between levels (a level left
 // half-played is kept and comes back), the level's name restarts it and the speaker turns sound
 // on or off. A win with no undo is a clean clear, and the level's name gets a star.
-import { Stage } from './render.js';
 import { Fx } from './fx.js';
 import { Sound, Buzz } from './audio.js';
 import { LEVELS, buildLevel, levelPrint, levelShape } from './levels.js';
@@ -65,7 +64,32 @@ if (Number.isNaN(current)) current = levelOf(store.get(SAVE_KEY), 0);
 if (Number.isNaN(current)) current = 0;
 
 // ---------- the pieces ----------
-const stage = new Stage($('gl'));
+// The 3D stage comes last: its library (three.js) is most of the game's download, so on a slow
+// connection the pads and crew are drawn first, with the placeholder (#loading) where the sculpture
+// will stand. Until the stage has arrived a stand-in keeps what it is told (the board to draw, the
+// view) and hands the last of it on; the rules do not tick (frame()) and a tap sends nobody
+// (onSend()), so no cube goes before it can be seen.
+let stage = {
+  shown: 0, load(...a) { this.loaded = a; }, setView(...v) { this.view = v; },
+  update() {}, resize() {}, screen: () => null, flash() {}, hit() {}, cleared() {}, finale() {},
+};
+let stageReady = false;
+function loadStage() {
+  // Its three files at once: imported one by one, each would wait for the one before it to arrive.
+  for (const href of ['js/render.js', 'vendor/three.module.js', 'vendor/three.core.js']) {
+    const link = document.createElement('link');
+    link.rel = 'modulepreload'; link.href = href;
+    document.head.append(link);
+  }
+  import('./render.js').then(({ Stage }) => {
+    const real = new Stage($('gl')), wait = stage;
+    if (wait.loaded) real.load(...wait.loaded);
+    if (wait.view) real.setView(...wait.view);
+    stage = real;
+    stageReady = true;
+    $('loading').hidden = true;
+  }, () => { $('loading-words').textContent = 'The sculpture did not load. Reload the game to try again.'; });
+}
 const fx = new Fx($('fx'));
 const sound = new Sound();
 const buzz = new Buzz($('haptic'));
@@ -201,7 +225,6 @@ function start(n, fresh = false) {
   lessonBreak();
   showBoard(!(back instanceof R.Attempt));
   lookAtBoard();
-  $('loading').hidden = true;
   if (back === 'changed') say('Level changed. Restarted.', 2500);
   else say('', 0);
 }
@@ -682,7 +705,7 @@ function teach() {
 // ---------- the one thing the player does: send the front of a line up to a pad ----------
 function onSend(ci) {
   sound.unlock();
-  if (state !== 'play' || !st.columns[ci]?.length) return;
+  if (state !== 'play' || !st.columns[ci]?.length || !stageReady) return;
   if (R.freeSlot(st) < 0) {
     sound.nope(); buzz.tick();
     $('pads').animate([{ transform: 'translateX(0)' }, { transform: 'translateX(-6px)' }, { transform: 'translateX(6px)' }, { transform: 'translateX(0)' }], { duration: 220 });
@@ -950,7 +973,7 @@ function frame(now) {
   // (one handled before this frame, or after the page showed and said so first).
   if (wall - lastWall >= AWAY_MS) reopened(lastWall);
   lastWall = wall;
-  if (state === 'play') tick(dt);
+  if (state === 'play' && stageReady) tick(dt);
   showView(dt);
   stage.update(dt);
   fx.update(dt);
@@ -1221,6 +1244,7 @@ new ResizeObserver(() => stage.resize()).observe($('stage'));
 
 start(current); // a level left half-played comes back where it was
 requestAnimationFrame(frame);
+loadStage(); // after the pads and crew are drawn: the sculpture fills in when its library arrives
 // A fresh load can come from an old copy in the cache (after iOS stopped the page, say). Only with
 // storage working: it is what stops a reload that keeps coming back old from trying again.
 if (store.get(SAVE_KEY) === String(current)) setTimeout(checkForUpdate, 1500);
