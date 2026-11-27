@@ -11,7 +11,12 @@ tests check it against a picture of a phone's screen). The cubes stand flush, so
 them shows through. The sculpture floats in the air, with nothing under it, and turns, so its sides come
 round in turn and its underside can be hit when you look from below; drag it to turn it
 yourself, and drag up or down to tilt the camera, from below it to almost straight
-down. Crew who have waited a while with nothing of theirs in
+down. Crew aim where you point. With no finger down, each crew member hits the cube of its
+colour nearest the front, the one nearest the camera, so turning the sculpture aims them. While
+a finger is on the sculpture, a round lens about twice the size of the phone's own magnifier
+floats above the thumb and shows what is under it twice as big, and the crew hit the cube of
+their colour nearest the middle of the lens; a dashed ring in the lens marks each cube the crew
+on the pads would hit next. Crew who have waited a while with nothing of theirs in
 view make the camera look higher, then lower (into a pit, under a part that sticks out); only
 after about 17 seconds of that may a shot take a cube out of sight. So the sculpture is eaten
 from the outside in, and the puzzle is in its layers: a colour hidden inside comes out only as
@@ -158,6 +163,8 @@ No build step and nothing to install. Every file is plain JavaScript the browser
 | The look of the crew, pads, top bar and short-window layout | `css/game.css` |
 | Sounds | `js/audio.js` (every sound is made in code). Ordinary pops are soft and at most about 9 a second (`POP_GAP`); the bright rising notes are for a crew member finishing, a colour cleared and a win. |
 | The 3D look: cubes, lights, camera framing, chips, puffs, the build at a level's start | `js/render.js` |
+| Where crew aim (nearest the front, or nearest the point under a finger) | `aim()`, `aimDistance()` and `setAim()` in `js/logic.js` |
+| The lens above the thumb: its size, zoom and place, the rings on the cubes the crew would hit | `LENS_ZOOM`, `LENS_SIZE`, `LENS_LIFT` and `drawLens()` in `js/render.js` |
 | Turning and tilting by hand | the view section of `js/main.js` (`TURN_PX`, `TILT_PX`, `FLING`, `REST`); the sculpture's own turn, the camera's range and how long crew wait before the camera looks around are `TURN`, `PITCH_MIN`/`PITCH_MAX`, `SEEK`, `LOOK` and `STALL` in `js/logic.js` |
 
 To try a change on your own computer, serve the folder and open it (the page loads modules,

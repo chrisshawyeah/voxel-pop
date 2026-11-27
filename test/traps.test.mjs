@@ -25,14 +25,14 @@ test('traps.mjs find, search and design refuse a level or a sculpture that does 
 });
 
 test('traps.mjs design --tune is not done when a full measure misses what the level tests want, though the quick looks pass', () => {
-  // The duck dealt on 2 pads (deal 0) has two trap moments; the greedy player wins 9% of the quick
-  // look's 120 plays and 13% of the full 300. Made level 5 with a greedy band of 0-12% (follow and
-  // undos left loose), the quick looks settle the tuning at once, 3 points inside the band, and the
-  // full measure is outside it, so the level tests would fail the board.
+  // The duck dealt on 2 pads (deal 20) has three trap moments; the greedy player wins 16% of the
+  // quick look's 120 plays and 20% of the full 300. Made level 5 with a greedy band of 0-19% (follow
+  // and undos left loose), the quick looks settle the tuning at once, 3 points inside the band, and
+  // the full measure is outside it, so the level tests would fail the board.
   const levels = new URL('../js/levels.js', import.meta.url).href;
-  const asLevel5 = `data:text/javascript,import { LEVELS } from '${levels}'; LEVELS[4] = { name: 'Duck', model: 'duck', cols: 3, pads: 2, crew: [60, 110], hidden: 0, mix: 0.1, flip: 0.8, deal: 0, greedy: [0, 12], follow: [0, 100], undos: 6 };`;
+  const asLevel5 = `data:text/javascript,import { LEVELS } from '${levels}'; LEVELS[4] = { name: 'Duck', model: 'duck', cols: 3, pads: 2, crew: [60, 110], hidden: 0, mix: 0.1, flip: 0.8, deal: 20, greedy: [0, 19], follow: [0, 100], undos: 6 };`;
   const r = traps(['design', '--level=5', '--tune', '--steps=0'], ['--import', asLevel5]);
   const out = JSON.parse(r.stdout.trim().split('\n').at(-1));
   assert.equal(r.status, 1, r.stdout + r.stderr);
-  assert.deepEqual([out.done, out.moments, out.greedy, out.misses], [false, 2, 13, ['greedy wins 13%, outside 0-12%']], r.stdout);
+  assert.deepEqual([out.done, out.moments, out.greedy, out.misses], [false, 3, 20, ['greedy wins 20%, outside 0-19%']], r.stdout);
 });

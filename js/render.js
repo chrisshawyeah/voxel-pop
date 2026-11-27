@@ -11,6 +11,19 @@ import { camBack } from './logic.js';
 const CHIP_POOL = 1400;
 const PUFF_POOL = 48;
 const RING_POOL = 4;
+// The lens (lensAt()): while a finger is on the stage, a disc about twice the size of the phone's
+// own magnifier floats above the thumb and shows what is under it LENS_ZOOM times bigger, with a
+// ring round each cube the crew on the pads would hit now (js/main.js passes them; the rules aim
+// them at the cube of their colour nearest the middle of the lens, js/logic.js aimDistance()).
+const LENS_ZOOM = 2;
+const LENS_SIZE = 0.44;   // the lens across, as a part of the stage's width ...
+const LENS_MIN = 150;     // ... but never under this many pixels across
+const LENS_MAX = 200;     // ... nor over this many
+const LENS_LIFT = 58;     // pixels between the thumb and the lens's lower edge, so the thumb never covers it
+const LENS_EDGE = 6;      // pixels the lens keeps from the stage's edges
+const AIM_RINGS = 8;
+// The page's sky (css/game.css, body), top to bottom of the window: the lens's background.
+const SKY = [[0, '#a9d6ff'], [0.38, '#cfe6ff'], [0.78, '#ffdcef'], [1, '#ffe8cf']].map(([t, c]) => [t, new THREE.Color(c)]);
 const CHIPS = 5;        // chips a cube bursts into (a pad fires up to 30 shots a second)
 const POP = 0.09;       // seconds a hit cube takes to pop
 const GLOW = 0.1;       // seconds a cube takes to glow white before its shot lands
@@ -96,6 +109,32 @@ export class Stage {
     });
     this.ringNext = 0;
 
+    // The lens: the scene drawn again through the part of this view under the finger, into a
+    // texture laid over the stage as a disc, with a white rim and the aim rings on top.
+    this.lens = null;
+    this.aims = [];
+    this.lensRT = new THREE.WebGLRenderTarget(2, 2, { samples: 4 });
+    this.lensRT.texture.colorSpace = THREE.SRGBColorSpace;
+    this.lensCam = this.camera.clone();
+    this.overlay = new THREE.Scene();
+    this.overCam = new THREE.OrthographicCamera(0, 1, 1, 0, -10, 10);
+    const flat = (mat, order) => { mat.depthTest = false; mat.depthWrite = false; mat.transparent = true; return order; };
+    this.lensShade = new THREE.Mesh(new THREE.CircleGeometry(1, 64), new THREE.MeshBasicMaterial({ color: '#1f2547', opacity: 0.22 }));
+    this.lensShade.renderOrder = flat(this.lensShade.material, 1);
+    this.lensRim = new THREE.Mesh(new THREE.CircleGeometry(1, 64), new THREE.MeshBasicMaterial({ color: '#ffffff' }));
+    this.lensRim.renderOrder = flat(this.lensRim.material, 2);
+    this.lensDisc = new THREE.Mesh(new THREE.CircleGeometry(1, 64), new THREE.MeshBasicMaterial({ map: this.lensRT.texture }));
+    this.lensDisc.renderOrder = flat(this.lensDisc.material, 3);
+    this.overlay.add(this.lensShade, this.lensRim, this.lensDisc);
+    const ringTex = makeAimRingTexture();
+    this.aimRings = Array.from({ length: AIM_RINGS }, () => {
+      const m = new THREE.Mesh(new THREE.PlaneGeometry(2, 2), new THREE.MeshBasicMaterial({ map: ringTex }));
+      m.renderOrder = flat(m.material, 4);
+      m.visible = false;
+      this.overlay.add(m);
+      return m;
+    });
+
     this.yaw = 0.6; this.pitch = 0.39;
     this.wob = 0; this.wobV = 0;
     this.flashes = new Map(); // instance -> seconds glowing
@@ -107,6 +146,7 @@ export class Stage {
   resize() {
     const r = this.canvas.getBoundingClientRect();
     const w = Math.max(1, r.width), h = Math.max(1, r.height);
+    this.cssW = w; this.cssH = h;
     this.renderer.setSize(w, h, false);
     this.camera.aspect = w / h;
     this.frame();
@@ -427,7 +467,130 @@ export class Stage {
       r.material.opacity = 0.9 * (1 - e);
     }
     this.renderer.render(this.scene, this.camera);
+    if (this.lens) this.drawLens();
   }
+
+  // ---------- the lens and the aim ----------
+  // Where a finger at page point (px, py) aims, as the rules keep it (js/logic.js setAim): the point
+  // under it on the plane through the middle of the sculpture square to the camera's line of sight,
+  // in cells to the right of and above that middle. null when the point is not on the stage.
+  aimOf(px, py) {
+    const r = this.canvas.getBoundingClientRect();
+    if (!(r.width > 0 && r.height > 0) || !this.size) return null;
+    const nx = ((px - r.left) / r.width) * 2 - 1, ny = -(((py - r.top) / r.height) * 2 - 1);
+    const cam = this.camera;
+    cam.updateMatrixWorld();
+    const o = cam.position, dir = tmpV.set(nx, ny, 0.5).unproject(cam).sub(o).normalize();
+    const ahead = new THREE.Vector3(), right = new THREE.Vector3(), up = new THREE.Vector3();
+    cam.matrixWorld.extractBasis(right, up, ahead);
+    ahead.negate();
+    const mid = new THREE.Vector3(0, this.size.top / 2, 0);
+    const along = dir.dot(ahead);
+    if (!(along > 1e-6)) return null;
+    const t = mid.clone().sub(o).dot(ahead) / along;
+    const q = o.clone().addScaledVector(dir, t).sub(mid);
+    return [q.dot(right), q.dot(up)];
+  }
+
+  // Shows the lens for a finger at page point (px, py): above the thumb, or beside it near the top
+  // of the stage, never past the stage's edges.
+  lensAt(px, py) {
+    const r = this.canvas.getBoundingClientRect();
+    const W = r.width, H = r.height;
+    const x = px - r.left, y = py - r.top;
+    const rad = Math.min(Math.max(LENS_SIZE * W, LENS_MIN), LENS_MAX, W - 2 * LENS_EDGE, H - 2 * LENS_EDGE) / 2;
+    if (!(rad > 10)) { this.lens = null; return; }
+    let cx = x, cy = y - LENS_LIFT - rad;
+    if (cy - rad < LENS_EDGE) { // no room above: beside the thumb, on the side with more room
+      cy = Math.max(rad + LENS_EDGE, Math.min(H - rad - LENS_EDGE, y));
+      cx = x + (x < W / 2 ? 1 : -1) * (LENS_LIFT + rad);
+    }
+    cx = Math.max(rad + LENS_EDGE, Math.min(W - rad - LENS_EDGE, cx));
+    this.lens = { x, y, cx, cy, rad, sky: py / Math.max(1, window.innerHeight) };
+  }
+
+  hideLens() { this.lens = null; }
+
+  // The cubes the crew on the pads would hit now (grid cells), ringed in the lens.
+  setAims(cells) { this.aims = cells; }
+
+  drawLens() {
+    const { x, y, cx, cy, rad, sky } = this.lens;
+    const W = this.cssW, H = this.cssH, rr = this.renderer;
+    const dpr = rr.getPixelRatio();
+    const size = Math.max(2, Math.round(2 * rad * dpr));
+    if (this.lensRT.width !== size) this.lensRT.setSize(size, size);
+    // The part of this very view the lens shows: a square LENS_ZOOM times smaller than the lens,
+    // round the finger, through the same camera, so what shows in it is what is under the finger.
+    const span = (2 * rad) / LENS_ZOOM;
+    const cam = this.lensCam;
+    cam.copy(this.camera);
+    cam.setViewOffset(W, H, x - span / 2, y - span / 2, span, span);
+    const clear = rr.getClearColor(new THREE.Color()), alpha = rr.getClearAlpha();
+    rr.setRenderTarget(this.lensRT);
+    rr.setClearColor(skyAt(sky), 1);
+    rr.clear();
+    rr.render(this.scene, cam);
+    rr.setRenderTarget(null);
+    rr.setClearColor(clear, alpha);
+    // The disc and its rings, laid over the stage in its own pixels (y up).
+    const oc = this.overCam;
+    oc.left = 0; oc.right = W; oc.top = H; oc.bottom = 0;
+    oc.updateProjectionMatrix();
+    const at = (m, s) => { m.position.set(cx, H - cy, 0); m.scale.set(s, s, 1); };
+    at(this.lensShade, rad + 7); this.lensShade.position.y -= 2;
+    at(this.lensRim, rad + 4);
+    at(this.lensDisc, rad);
+    // A ring round each cube the crew would hit, where the lens shows it; none for one outside it.
+    const fovTan = Math.tan((this.camera.fov * Math.PI) / 360);
+    let k = 0;
+    for (const i of this.aims) {
+      if (k >= AIM_RINGS || this.idOf?.[i] === undefined || this.idOf[i] < 0) continue;
+      const p = this.world(i);
+      const dist = p.distanceTo(this.camera.position);
+      const v = p.project(this.camera);
+      const sx = (v.x * 0.5 + 0.5) * W, sy = (-v.y * 0.5 + 0.5) * H;
+      const lx = cx + (sx - x) * LENS_ZOOM, ly = cy + (sy - y) * LENS_ZOOM;
+      const cube = (H / (2 * fovTan * dist)) * LENS_ZOOM; // a cube's size in the lens, in pixels
+      const ring = Math.max(10, cube * 0.78);
+      if (Math.hypot(lx - cx, ly - cy) > rad - ring * 0.4) continue;
+      const m = this.aimRings[k++];
+      m.visible = true;
+      m.position.set(lx, H - ly, 0);
+      m.scale.set(ring, ring, 1);
+    }
+    for (; k < AIM_RINGS; k++) this.aimRings[k].visible = false;
+    const auto = rr.autoClear;
+    rr.autoClear = false;
+    rr.render(this.overlay, oc);
+    rr.autoClear = auto;
+  }
+}
+
+// The page's sky at `t`, 0 at the top of the window to 1 at its foot.
+const skyColor = new THREE.Color();
+function skyAt(t) {
+  t = Math.max(0, Math.min(1, t));
+  for (let k = 1; k < SKY.length; k++) {
+    if (t > SKY[k][0]) continue;
+    const [t0, c0] = SKY[k - 1], [t1, c1] = SKY[k];
+    return skyColor.copy(c0).lerp(c1, (t - t0) / (t1 - t0 || 1));
+  }
+  return skyColor.copy(SKY[SKY.length - 1][1]);
+}
+
+// The ring round a cube the crew would hit: white under a dark dashed line, as on the mockup.
+function makeAimRingTexture() {
+  const c = document.createElement('canvas');
+  c.width = c.height = 128;
+  const g = c.getContext('2d');
+  g.lineWidth = 12; g.strokeStyle = '#ffffff';
+  g.beginPath(); g.arc(64, 64, 54, 0, Math.PI * 2); g.stroke();
+  g.lineWidth = 6; g.strokeStyle = '#1f2547'; g.setLineDash([14, 10]);
+  g.beginPath(); g.arc(64, 64, 54, 0, Math.PI * 2); g.stroke();
+  const t = new THREE.CanvasTexture(c);
+  t.colorSpace = THREE.SRGBColorSpace;
+  return t;
 }
 
 // The face of every cube: white with a darker groove at its edges (the instance colour tints it),

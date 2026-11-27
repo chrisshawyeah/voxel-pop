@@ -31,7 +31,7 @@ export const FAST = 3;        // how much faster the ticks run while there is no
 // Which version of these rules a saved attempt was played under (js/main.js keeps it with the
 // save). Add one whenever a change here makes the same sends end on a different board, so a level
 // left half-played under the old rules starts again instead of coming back wrong.
-export const RULES = 9;
+export const RULES = 10;
 // The view (see the top of this file). A turn of the sculpture is YAW_STEPS steps; on its own it
 // turns TURN steps a tick (about 0.41 radians a second, a turn in 15 seconds at normal speed). The
 // camera looks from PITCH_MIN to PITCH_MAX radians above level in PITCH_STEPS steps: from well
@@ -74,12 +74,15 @@ export const coords = (st, i) => [i % st.sx, Math.floor(i / st.sx) % st.sy, Math
 export const index = (st, x, y, z) => x + st.sx * (y + st.sy * z);
 
 // The one targeting rule, used by the game, the checks and the test players alike: of the cubes
-// a crew member can hit now (seen by the camera, seen()), it takes the highest one
-// first, and on the same layer the one farthest from the middle, so each crew peels its colour
-// from the top down and from the outside in; one with a clear line to the camera before one hidden
-// behind another part (target()). It depends on the view only through the board's own st.yaw and
-// st.pitch, so the same taps and turns give the same board every time. order[i] is cell i's place
-// in that rule (lower goes first); it depends only on the grid's size, so boards share it.
+// a crew member can hit now (seen by the camera, seen()), it takes the one nearest the front, the
+// nearest the camera, so turning the sculpture aims the crew; while a finger is on the sculpture,
+// the one nearest the point under it, the middle of the lens the screen shows above the thumb
+// (st.aimAt, setAim(), aimDistance()). It depends on the view only through the board's own st.yaw,
+// st.pitch and st.aimAt, so the same taps, turns and aims give the same board every time.
+// order[i] is cell i's place in the old rule (highest first, then farthest from the middle): it
+// depends only on the grid's size, and js/levels.js still deals the crew by it.
+export const AIM_UNIT = 8;    // aim points to a cell: where a finger aims is kept to an eighth of a cube
+export const AIM_MAX = 4096;  // the farthest an aim may be from the middle, in aim points
 const orderCache = new Map();
 function targetOrder(sx, sy, sz) {
   const key = `${sx}x${sy}x${sz}`;
@@ -144,11 +147,13 @@ export function makeBoard(model) {
     reachR, topY,
     remaining: new Int32Array(n),
     exposed: Array.from({ length: n }, () => new Set()),
-    byOrder: Array.from({ length: n }, () => []), sorted: new Uint8Array(n).fill(1),
     total: 0, cleared: 0,
     tick: 0, flying: [],
     yaw: START_YAW, pitch: START_PITCH, spin: TURN, home: START_PITCH,
     rev: 0, quiet: 0, aimKey: new Float64Array(n).fill(-1), aimCell: new Int32Array(n),
+    // Where a finger aims the crew ([u, v] in aim points, setAim()), null with no finger down; aimGen
+    // counts its changes, so what target() kept for the last aim is not used for the next.
+    aimAt: null, aimGen: 0,
     // The camera's swing for crew who wait (step()): the height it swung to, whether a sliver will
     // do, the search known to find nothing, how far back the camera stands at each height, and
     // how many more ticks the view holds still while the shot it swung for flies.
@@ -193,7 +198,6 @@ export function cloneBoard(st) {
     memo: null, memoRev: -1,
     remaining: Int32Array.from(st.remaining),
     exposed: st.exposed.map(s => new Set(s)),
-    byOrder: st.byOrder.map(a => a.slice()), sorted: Uint8Array.from(st.sorted),
     flying: st.flying.slice(),
     columns: st.columns.map(col => col.map(s => ({ ...s }))),
     slots: st.slots.map(s => (s ? { ...s } : null)),
@@ -210,13 +214,9 @@ function reach(st, i) {
   return true;
 }
 
-// Cube i of colour c joins the cubes a crew member of that colour may pick. st.byOrder[c] holds
-// them in the targeting order (with cubes since taken or gone left in, skipped by target()), sorted
-// again only when a cube has joined since.
+// Cube i of colour c joins the cubes a crew member of that colour may pick.
 function list(st, c, i) {
   st.exposed[c].add(i);
-  st.byOrder[c].push(i);
-  st.sorted[c] = 0;
 }
 
 // Cell i has just become outside air: it opens the cubes beside it, and the air runs on into any
@@ -627,10 +627,12 @@ export const canFire = (st, slot) => canReach(st, slot) && !(st.slots[slot].land
 // (st.rev), since a pad asks every tick.
 export function target(st, c) {
   const key = viewKey(st) * 2 ** 27 + (st.rev % 2 ** 25) * 2 + (st.sliver ? 1 : 0);
-  if (st.aimKey[c] === key) return st.aimCell[c];
-  // While the board stays as it is, the turning sculpture brings the same views round again: what each
-  // colour can hit from each is kept until something on the board changes (st.rev).
-  if (st.memoRev !== st.rev || !st.memo) { st.memo = new Map(); st.memoRev = st.rev; }
+  if (st.aimKey[c] === key && st.aimSeen === st.aimGen) return st.aimCell[c];
+  // While the board and the aim stay as they are, the turning sculpture brings the same views round
+  // again: what each colour can hit from each is kept until something on the board changes (st.rev)
+  // or a finger aims somewhere else (st.aimGen).
+  if (st.memoRev !== st.rev || st.memoAim !== st.aimGen || !st.memo) { st.memo = new Map(); st.memoRev = st.rev; st.memoAim = st.aimGen; }
+  if (st.aimSeen !== st.aimGen) { st.aimKey.fill(-1); st.aimSeen = st.aimGen; }
   const mk = (viewKey(st) * 2 + (st.sliver ? 1 : 0)) * 64 + c;
   const known = st.memo.get(mk);
   if (known !== undefined) { st.aimKey[c] = key; st.aimCell[c] = known; return known; }
@@ -640,33 +642,81 @@ export function target(st, c) {
   return pick;
 }
 
+// A cube the camera sees, by any of the three looks: the quick check, a fair part of a face, or
+// a good part of the cube at a slant (seen() for any cube).
+const inSight = (st, i, m) => plainView(st, i, m) || faceView(st, i) || shows(st, i);
+
+// The cubes of colour c on the outside, nearest the aim first (aimDistance()); the first the camera
+// sees is the one. The nearest is almost always in sight, so the first few are found by looking
+// for the nearest of those left, and only a colour mostly out of sight is sorted in full.
+const QUICK_TRIES = 4;
 function aim(st, c) {
-  const order = st.order, set = st.exposed[c];
-  let list = st.byOrder[c];
-  if (!st.sorted[c] || list.length > 2 * set.size + 16) {
-    list = st.byOrder[c] = [...set].sort((a, b) => order[a] - order[b]);
-    st.sorted[c] = 1;
-  }
-  // The quick check first; only when it finds nothing, every face.
+  const set = st.exposed[c];
+  if (!set.size) return -1;
+  const n = set.size, cells = new Int32Array(n), dist = new Float64Array(n);
+  let k = 0;
+  const frame = aimFrame(st);
+  for (const i of set) { cells[k] = i; dist[k] = aimDistance(st, i, frame); k++; }
   const m = sideMask(st);
-  for (let k = 0; k < list.length; k++) {
-    const i = list[k];
-    if (set.has(i) && plainView(st, i, m)) return i;
+  const before = (a, b) => dist[a] < dist[b] || (dist[a] === dist[b] && cells[a] < cells[b]);
+  for (let t = 0; t < QUICK_TRIES && t < n; t++) {
+    let best = t;
+    for (let q = t + 1; q < n; q++) if (before(q, best)) best = q;
+    if (best !== t) { [cells[t], cells[best]] = [cells[best], cells[t]]; [dist[t], dist[best]] = [dist[best], dist[t]]; }
+    if (inSight(st, cells[t], m)) return cells[t];
   }
-  // Then any face of a cube on the outside air turned to the camera with a fair part of it in
-  // clear sight of the camera: a cube seen at a slant, into a notch or from below.
-  for (let k = 0; k < list.length; k++) {
-    const i = list[k];
-    if (set.has(i) && faceView(st, i)) return i;
-  }
-  // Last, a cube that shows a good part of itself though fewer than two of a face's five points
-  // are clear: half under an overhang, or seen into a notch at a slant (shows()).
-  for (let k = 0; k < list.length; k++) {
-    const i = list[k];
-    if (set.has(i) && shows(st, i)) return i;
-  }
+  if (n <= QUICK_TRIES) return -1;
+  const rest = Array.from({ length: n - QUICK_TRIES }, (_, q) => q + QUICK_TRIES).sort((a, b) => dist[a] - dist[b] || cells[a] - cells[b]);
+  for (const q of rest) if (inSight(st, cells[q], m)) return cells[q];
   return -1;
 }
+
+// The camera's own frame for this step of the view, in the grid's frame: where it stands (camPos()),
+// how far back from the middle of the sculpture (lookAt()), the way it looks (`ahead`) and the
+// screen's right and up there. js/render.js draws from the same place, so right and up are the
+// screen's.
+function aimFrame(st) {
+  const key = viewKey(st);
+  if (st._ak === key) return st._af;
+  const a = yawRad(viewYaw(st)), p = pitchRad(st.pitch);
+  const v = viewDir(st), C = camPos(st), M = lookAt(st);
+  st._ak = key;
+  st._af = {
+    C, back: Math.hypot(C[0] - M[0], C[1] - M[1], C[2] - M[2]),
+    ahead: [-v[0], -v[1], -v[2]],
+    right: [Math.cos(a), 0, Math.sin(a)],
+    up: [Math.sin(p) * Math.sin(a), Math.cos(p), -Math.sin(p) * Math.cos(a)],
+  };
+  return st._af;
+}
+
+// How far cube i is from where the crew aim. With no finger down, its distance from the camera:
+// the nearest the front goes first. With a finger down (st.aimAt), how far it shows on the screen
+// from the point under the finger, measured in cells on the plane through the middle of the
+// sculpture square to the camera's line of sight (where st.aimAt is kept); a cube the same distance
+// away on the screen goes nearer the front first.
+export function aimDistance(st, i, frame = aimFrame(st)) {
+  const { sx, sy } = st, { C, ahead, right, up, back } = frame;
+  const dx = (i % sx) + 0.5 - C[0], dy = (Math.floor(i / sx) % sy) + 0.5 - C[1], dz = Math.floor(i / (sx * sy)) + 0.5 - C[2];
+  const along = dx * ahead[0] + dy * ahead[1] + dz * ahead[2];
+  if (!st.aimAt) return Math.hypot(dx, dy, dz);
+  const s = back / along;
+  const u = (dx * right[0] + dy * right[1] + dz * right[2]) * s - st.aimAt[0] / AIM_UNIT;
+  const w = (dx * up[0] + dy * up[1] + dz * up[2]) * s - st.aimAt[1] / AIM_UNIT;
+  return Math.round((u * u + w * w) * 1e6) + along / 1e4; // a hair nearer counts the same, then the front
+}
+
+// A finger aims the crew at [u, v] (aim points, AIM_UNIT to a cell, to the right of and above the
+// middle of the sculpture as the screen shows it), or, with null, no finger is down. False when it
+// is no aim at all.
+export function setAim(st, at) {
+  if (at !== null && !(Array.isArray(at) && at.length === 2 && at.every(n => Number.isSafeInteger(n) && Math.abs(n) <= AIM_MAX))) return false;
+  if (sameAim(st.aimAt, at)) return true;
+  st.aimAt = at && [at[0], at[1]];
+  st.aimGen++;
+  return true;
+}
+const sameAim = (a, b) => (!a && !b) || (!!a && !!b && a[0] === b[0] && a[1] === b[1]);
 
 // One shot leaves a pad: it takes its cube (no other shot aims at it) and is in the air until
 // tick `at`. A crew member that has just sent its last shot leaves the pad at once, so the pad
@@ -816,6 +866,7 @@ export const turned = (yaw, by) => (((yaw + by) % YAW_STEPS) + YAW_STEPS) % YAW_
 // player who waits sees. The sculpture turns on its own meanwhile (a board held still is let go).
 export function settle(st) {
   if (!st.spin) st.spin = TURN;
+  setAim(st, null);
   let quiet = 0;
   while (busy(st)) {
     const r = step(st);
@@ -890,6 +941,7 @@ export function setView(st, yaw, pitch, spin) {
 // pad is taken).
 export function forecast(st, col, land = 0, base = null) {
   const sim = cloneBoard(st);
+  setAim(sim, null); // the player leaves it be: no finger aims
   const d = deploy(sim, col, land);
   if (!d) return null;
   const me = d.shooter;
@@ -920,6 +972,7 @@ export const forecastKey = f => (!f ? 'full' : !f.strands.length && f.finishes ?
 // a crew member that a later send has robbed shows it at once, before it runs dry.
 export function fates(st) {
   const sim = cloneBoard(st);
+  setAim(sim, null);
   const onPads = sim.slots.filter(Boolean);
   let quiet = 0;
   while (busy(sim) && quiet <= 2 * STALL) {
@@ -939,9 +992,10 @@ const sameCheck = (a, b) => Array.isArray(b) && b.length === 4 && a.every((v, k)
 // just after each, and a copy of the board from just before each one, so the last send can be
 // taken back, again and again, to the start of the level. `undos` counts every send taken back in
 // this attempt; undoing never lowers it, and a win with none is a clean clear (js/main.js).
-// `views` holds every change the player made to the view, [tick, yaw, pitch, spin], and `marks`
-// how many of them came before each send, so a replay turns the sculpture the same way and hits
-// the same cubes. restore() rebuilds all of it from save(), which is what the game keeps in the
+// `views` holds every change the player made to the view, [tick, yaw, pitch, spin], with the aim
+// after them while a finger aims ([tick, yaw, pitch, spin, u, v], setAim()), and `marks` how many
+// of them came before each send, so a replay turns the sculpture the same way, aims where the
+// player aimed and hits the same cubes. restore() rebuilds all of it from save(), which is what the game keeps in the
 // browser's storage.
 export const MAX_VIEWS = 100000;
 export class Attempt {
@@ -969,14 +1023,17 @@ export class Attempt {
     return d;
   }
 
-  // The player turns or tilts the sculpture, or holds it or lets it go (spin): the board takes the
-  // new view now, and it is kept for a replay. A change at the same tick as the last one, with no
-  // send between them, replaces it. False when nothing changed or it is no view.
-  view(yaw, pitch, spin) {
+  // The player turns or tilts the sculpture, holds it or lets it go (spin), or aims with a finger
+  // (`at`, setAim(); null when no finger is down): the board takes the new view now, and it is kept
+  // for a replay. A change at the same tick as the last one, with no send between them, replaces
+  // it. False when nothing changed or it is no view.
+  view(yaw, pitch, spin, at = null) {
     const b = this.board;
-    if (b.yaw === yaw && b.pitch === pitch && b.spin === spin) return false;
-    if (!setView(b, yaw, pitch, spin)) return false;
-    const e = [b.tick, yaw, pitch, spin];
+    if (b.yaw === yaw && b.pitch === pitch && b.spin === spin && sameAim(b.aimAt, at)) return false;
+    const was = b.aimAt;
+    if (!setAim(b, at)) return false;
+    if (!setView(b, yaw, pitch, spin)) { setAim(b, was); return false; }
+    const e = at ? [b.tick, yaw, pitch, spin, at[0], at[1]] : [b.tick, yaw, pitch, spin];
     const last = this.views[this.views.length - 1];
     if (last && last[0] === b.tick && this.views.length > (this.marks[this.marks.length - 1] || 0)) this.views[this.views.length - 1] = e;
     else if (this.views.length < MAX_VIEWS) this.views.push(e);
@@ -1037,7 +1094,8 @@ export class Attempt {
       const e = views[k];
       if (e[0] < this.board.tick || e[0] > limit) return false;
       advance(this.board, e[0]);
-      if (!this.view(e[1], e[2], e[3]) && !(this.board.yaw === e[1] && this.board.pitch === e[2] && this.board.spin === e[3])) return false;
+      const at = e.length === 6 ? [e[4], e[5]] : null;
+      if (!this.view(e[1], e[2], e[3], at) && !(this.board.yaw === e[1] && this.board.pitch === e[2] && this.board.spin === e[3] && sameAim(this.board.aimAt, at))) return false;
     }
     return true;
   }
@@ -1063,14 +1121,16 @@ export class Attempt {
   }
 }
 
-// A list of view changes as save() writes it: [tick, yaw, pitch, spin], ticks never going back.
+// A list of view changes as save() writes it: [tick, yaw, pitch, spin], or with an aim
+// [tick, yaw, pitch, spin, u, v], ticks never going back.
 function okViews(views) {
   if (!Array.isArray(views) || views.length > MAX_VIEWS) return false;
   let t = 0;
   for (const e of views) {
-    if (!Array.isArray(e) || e.length !== 4 || !e.every(Number.isSafeInteger)) return false;
+    if (!Array.isArray(e) || (e.length !== 4 && e.length !== 6) || !e.every(Number.isSafeInteger)) return false;
     if (e[0] < t || e[0] > MAX_TICK) return false;
     if (e[1] < 0 || e[1] >= YAW_STEPS || e[2] < 0 || e[2] >= PITCH_STEPS || e[3] < 0 || e[3] > MAX_SPIN) return false;
+    if (e.length === 6 && (Math.abs(e[4]) > AIM_MAX || Math.abs(e[5]) > AIM_MAX)) return false;
     t = e[0];
   }
   return true;
