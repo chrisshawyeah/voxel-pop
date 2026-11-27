@@ -1089,12 +1089,28 @@ window.addEventListener('pageshow', e => { if (e.persisted) checkForUpdate(); })
 // (att.view, kept in the attempt, so a saved attempt plays back to the same cubes). Let go, a
 // flick keeps it turning a moment; then it rests, and the sculpture takes up its own turn again,
 // gently. Between levels and when out of room nothing ticks, and it just turns.
+//
+// While the finger is on the stage it also aims: a lens above the thumb shows what is under it,
+// bigger, and the crew hit the cube of their colour nearest the middle of the lens (the point under
+// the finger, R.setAim, kept with the view in the attempt). With no finger down they hit the one
+// nearest the front, so turning the sculpture aims them too.
 const TURN_PX = 0.011;  // radians of turn per pixel dragged sideways
 const TILT_PX = 0.007;  // radians of tilt per pixel dragged up or down
 const FLING = 2.4;      // the fastest turn a flick leaves, radians a second
 const REST = 0.9;       // seconds the sculpture stays still after a drag before turning on its own
 const YAW_FOLLOW = 8;   // turning steps (0.7 degrees) the hand moves before the board takes the new view
 const look = { yaw: R.yawRad(R.START_YAW), pitch: R.pitchRad(R.START_PITCH), hand: 'auto', vy: 0, vp: 0, rest: 0 };
+// Where the finger on the stage is now (page pixels), null when none is.
+let aimFinger = null;
+// The aim the rules take before each tick: the point under the finger in aim points, or null.
+function aimNow() {
+  if (!aimFinger) return null;
+  const a = stage.aimOf(aimFinger.x, aimFinger.y);
+  if (!a) return null;
+  const q = v => Math.max(-R.AIM_MAX, Math.min(R.AIM_MAX, Math.round(v * R.AIM_UNIT)));
+  return [q(a[0]), q(a[1])];
+}
+const sameAim = (a, b) => (!a && !b) || (!!a && !!b && a[0] === b[0] && a[1] === b[1]);
 const wrapPi = a => a - 2 * Math.PI * Math.round(a / (2 * Math.PI));
 const tilted = p => Math.max(R.PITCH_MIN, Math.min(R.PITCH_MAX, p));
 
@@ -1110,15 +1126,15 @@ function viewBeforeTick() {
   }
   // Held, the rules look from exactly where the sculpture stands, so the board follows the hand to
   // within YAW_FOLLOW steps (under a degree), not every step, to keep the saved views few.
-  const y = R.yawUnits(look.yaw), p = R.pitchUnits(look.pitch);
+  const y = R.yawUnits(look.yaw), p = R.pitchUnits(look.pitch), at = aimNow();
   const dy = Math.abs(((y - st.yaw + R.YAW_STEPS / 2) % R.YAW_STEPS + R.YAW_STEPS) % R.YAW_STEPS - R.YAW_STEPS / 2);
-  if (st.spin || p !== st.pitch || dy >= YAW_FOLLOW) att.view(y, p, 0);
+  if (st.spin || p !== st.pitch || dy >= YAW_FOLLOW || !sameAim(st.aimAt, at)) att.view(y, p, 0, at);
 }
 
 // The board takes exactly the view on the screen (an undo's board is from before the send).
 function keepView() {
   if (look.hand === 'ramp') look.hand = 'auto';
-  att.view(R.yawUnits(look.yaw), R.pitchUnits(look.pitch), look.hand === 'auto' ? R.TURN : 0);
+  att.view(R.yawUnits(look.yaw), R.pitchUnits(look.pitch), look.hand === 'auto' ? R.TURN : 0, aimNow());
 }
 
 // A level's start, or a level coming back: the screen shows the board's view as it is. A board
@@ -1154,6 +1170,24 @@ function showView(dt) {
     }
   }
   stage.setView(look.yaw, look.pitch);
+  showLens();
+}
+
+// The lens follows the finger and rings the cubes the crew on the pads would hit now.
+function showLens() {
+  if (!aimFinger || !st || (state !== 'play' && state !== 'jam')) { stage.hideLens(); return; }
+  stage.lensAt(aimFinger.x, aimFinger.y);
+  stage.setAims(padTargets());
+}
+// The cubes the crew on the pads would hit now, one per colour.
+function padTargets() {
+  const cells = [];
+  for (const s of st.slots) {
+    if (!s || !(s.count > 0) || s.land > 0) continue;
+    const i = R.target(st, s.color);
+    if (i >= 0 && !cells.includes(i)) cells.push(i);
+  }
+  return cells;
 }
 
 {
@@ -1167,6 +1201,7 @@ function showView(dt) {
     lastX = e.clientX; lastY = e.clientY; lastT = e.timeStamp; vy = vp = 0;
     cv.setPointerCapture(e.pointerId);
     look.hand = 'drag'; look.vy = look.vp = 0;
+    aimFinger = { x: e.clientX, y: e.clientY };
   });
   // The speed is distance over time, smoothed over about 60 ms, so it does not depend on how often
   // the screen reports the finger.
@@ -1183,12 +1218,15 @@ function showView(dt) {
     }
     dragged += Math.abs(dx) + Math.abs(dy);
     lastX = e.clientX; lastY = e.clientY; lastT = e.timeStamp;
+    aimFinger = { x: e.clientX, y: e.clientY };
   });
   // Let go: a finger still moving leaves it turning (at most FLING); one that stopped first leaves
   // it still.
   const end = e => {
     if (e.pointerId !== finger) return;
     finger = null;
+    aimFinger = null;
+    stage.hideLens();
     const still = e.timeStamp - lastT > 90;
     look.vy = still ? 0 : Math.max(-FLING, Math.min(FLING, vy));
     look.vp = still ? 0 : Math.max(-FLING / 2, Math.min(FLING / 2, vp));
@@ -1249,6 +1287,11 @@ window.crumble = {
   get clean() { return !!(cleanMask & bit(current)); }, get stars() { return bestStars[current]; }, get speed() { return speed; },
   get drawn() { return { shots: fx.shots.length, cubes: stage.shown }; },
   get view() { return { yaw: st.yaw, pitch: st.pitch, spin: st.spin, hand: look.hand, shown: [look.yaw, look.pitch] }; },
+  // Where a finger aims (the rules' st.aimAt), the lens on screen, the cubes the crew would hit with
+  // where each shows on the page, and how many rings the lens draws.
+  get aim() {
+    return { at: st.aimAt, finger: aimFinger, lens: stage.lens && { ...stage.lens }, targets: padTargets().map(i => ({ cell: i, ...stage.screen(i) })), rings: stage.aimRings.filter(m => m.visible).length };
+  },
   snapshot,
   start: n => start(n, true), send: onSend, undo, checkForUpdate,
 };

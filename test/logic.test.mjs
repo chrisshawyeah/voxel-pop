@@ -6,7 +6,8 @@ import { join } from 'node:path';
 import { spawnSync } from 'node:child_process';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { makeBoard, cloneBoard, removeCube, deploy, fire, step, settle, launch, target, isJammed, isWon, canFire, canReach, purgeCleared, isExposed, freeSlot, FLIGHT, tickGame, advance, forecast, forecastKey, fates, busy, revealLone, checkOf, pace, Attempt, FAST,
-  setView, seen, camPos, lookAt, pitchUnits, pitchRad, YAW_STEPS, START_YAW, START_PITCH, PITCH_STEPS, TURN, SEEK, STALL } from '../js/logic.js';
+  setView, seen, camPos, lookAt, pitchUnits, pitchRad, YAW_STEPS, START_YAW, START_PITCH, PITCH_STEPS, TURN, SEEK, STALL,
+  setAim, aimDistance, AIM_UNIT } from '../js/logic.js';
 import { pixels, facePixels } from '../tools/sight.mjs';
 import { checkTraps, findTraps } from '../tools/traps.mjs';
 import { LEVELS, buildLevel, dealLevel, levelPrint, levelShape, rng } from '../js/levels.js';
@@ -27,8 +28,7 @@ const grid = (sx, sy, sz, cubes, palette = ['#f00', '#0f0', '#00f', '#ff0']) => 
 };
 // A cube of colour `core` in the middle of a 3 x 3 x 3 grid, with a cube of colour `lid` on top of
 // it and one of colour `side` on each of its four sides and under it (the sculpture floats, so its
-// underside is open air too): it can be hit only once one of those six has gone. The lid is the
-// highest, so a crew of its colour takes it first.
+// underside is open air too): it can be hit only once one of those six has gone.
 const covered = (core, lid, side = lid) => grid(3, 3, 3, [[1, 1, 1, core], [1, 2, 1, lid], [0, 1, 1, side], [2, 1, 1, side], [1, 1, 0, side], [1, 1, 2, side], [1, 0, 1, side]]);
 const CORE = 1 + 3 * (1 + 3 * 1), LID = 1 + 3 * (2 + 3 * 1); // the core's and the lid's cells
 // The lines whose front crew member has a cube of its colour to hit right now. Most levels keep
@@ -91,9 +91,10 @@ test('air sealed inside a hollow does not open its walls until the hollow is ope
 test('a shot takes its cube when it leaves, and opens what is behind it only when it lands', () => {
   const st = makeBoard(covered(2, 1)); // green sealed in by six red
   st.slots = [crew(0, 0, 6), crew(1, 1, 1)];
+  const near = target(st, 0); // the red cube nearest the camera, beside the green one like all six
   const first = step(st);
-  assert.deepEqual(first.shots.map(s => s.cell), [LID], 'red fires at its highest cube, the lid; green has nothing yet');
-  assert.equal(st.cells[LID], 1, 'the lid is still there while the shot flies');
+  assert.deepEqual(first.shots.map(s => s.cell), [near], 'red fires at its cube nearest the front; green has nothing yet');
+  assert.equal(st.cells[near], 1, 'that cube is still there while the shot flies');
   for (let t = 1; t < FLIGHT; t++) {
     const s = step(st);
     assert.ok(s.shots.every(x => x.slot === 0), `tick ${t + 1}: green waits, the lid is not hit yet`);
@@ -102,8 +103,8 @@ test('a shot takes its cube when it leaves, and opens what is behind it only whe
     assert.equal(isWon(st), false);
   }
   const land = step(st);
-  assert.deepEqual(land.landed, [LID]);
-  assert.ok(land.shots.some(s => s.cell === CORE && s.slot === 1), 'green opens when the lid lands, and fires the same tick');
+  assert.deepEqual(land.landed, [near]);
+  assert.ok(land.shots.some(s => s.cell === CORE && s.slot === 1), 'green opens when that cube lands, and fires the same tick');
   assert.equal(isWon(st), false, 'not won while the last shot is in the air');
   settle(st);
   assert.equal(isWon(st), true);
@@ -139,18 +140,41 @@ test('a crew member landing on its pad waits its ticks, and landing is not out o
   assert.equal(isWon(st), true);
 });
 
-test('one targeting rule: the highest cube first, then the one farthest out, never the camera', () => {
-  const m = solid(3);
+// The cube of colour c the camera sees that is nearest the camera (no finger down), by brute force.
+const frontmost = (st, c) => {
+  const C = camPos(st);
+  let best = -1, bd = Infinity;
+  for (const i of st.exposed[c]) {
+    if (!seen(st, i)) continue;
+    const [x, y, z] = [i % st.sx, Math.floor(i / st.sx) % st.sy, Math.floor(i / (st.sx * st.sy))];
+    const d = Math.hypot(x + 0.5 - C[0], y + 0.5 - C[1], z + 0.5 - C[2]);
+    if (d < bd || (d === bd && i < best)) { bd = d; best = i; }
+  }
+  return best;
+};
+
+test('one targeting rule: the cube nearest the front, so turning the sculpture aims the crew', () => {
+  const m = solid(5);
   const st = makeBoard(m);
-  assert.equal(target(st, 0), at(m, 0, 2, 0), 'a corner of the top layer');
-  st.slots = [crew(0, 0, 27)];
-  const order = [];
-  while (st.slots[0] || st.flying.length) for (const s of step(st).shots) order.push(s.cell);
-  const height = i => Math.floor(i / 3) % 3;
-  assert.deepEqual(order.slice(0, 9).map(height), Array(9).fill(2), 'the whole top layer goes first');
-  assert.deepEqual(order.slice(0, 4).map(i => i % 3 !== 1 && Math.floor(i / 9) !== 1), [true, true, true, true], 'its four corners before its middle');
-  assert.equal(order[8], at(m, 1, 2, 1), 'the middle of the top layer last');
-  assert.equal(isWon(st), true);
+  setView(st, 0, START_PITCH, 0);
+  const front = target(st, 0);
+  assert.equal(front, frontmost(st, 0), 'the cube nearest the camera');
+  const C = camPos(st), z = Math.floor(front / 25);
+  assert.equal(z, 4, 'on the side turned to the camera (it stands at +z)');
+  assert.ok(C[2] > 5);
+  setView(st, YAW_STEPS / 2, START_PITCH, 0);
+  const back = target(st, 0);
+  assert.equal(back, frontmost(st, 0));
+  assert.equal(Math.floor(back / 25), 0, 'turned half round, the other side is the front');
+  // Fired on, held still, the crew eat into the side facing them, and every shot takes the
+  // nearest cube still standing.
+  const t = makeBoard(m);
+  setView(t, 0, START_PITCH, 0);
+  t.slots = [crew(0, 0, 10)];
+  for (let k = 0; k < 10; k++) {
+    const want = frontmost(t, 0);
+    assert.equal(fire(t, 0), want, `shot ${k + 1} takes the nearest cube`);
+  }
   // The same taps at the same ticks give the same board (the sculpture turns the same way).
   const L = buildLevel(8);
   const a = cloneBoard(L.board), b = cloneBoard(L.board);
@@ -163,6 +187,64 @@ test('one targeting rule: the highest cube first, then the one farthest out, nev
   assert.ok(a.cleared > 0);
   assert.deepEqual([a.h1, a.h2, a.cleared], [b.h1, b.h2, b.cleared]);
   assert.deepEqual(a.cells, b.cells);
+});
+
+test('a finger aims: the crew hit the cube of their colour nearest the point under it', () => {
+  const m = solid(5);
+  const st = makeBoard(m);
+  setView(st, 0, START_PITCH, 0);
+  const front = target(st, 0);
+  // Every cube the camera sees, by where it shows on the screen (in cells from the middle).
+  const shown = [...st.exposed[0]].filter(i => seen(st, i));
+  // Aimed far to the right, then far to the left, then straight at a cube: each time the nearest.
+  for (const at of [[40 * AIM_UNIT, 0], [-40 * AIM_UNIT, 0], [0, 40 * AIM_UNIT], [0, -40 * AIM_UNIT]]) {
+    assert.ok(setAim(st, at));
+    const hit = target(st, 0);
+    assert.ok(seen(st, hit), 'a cube the camera sees');
+    const best = Math.min(...shown.map(i => aimDistance(st, i)));
+    assert.equal(aimDistance(st, hit), best, `aimed at ${at}: the nearest the camera sees`);
+  }
+  assert.notEqual(target(st, 0), front, 'aiming low picks another cube than the front one');
+  // Aimed exactly where a cube shows, that cube.
+  for (const i of shown.slice(0, 12)) {
+    const probe = cloneBoard(st); setAim(probe, null);
+    // Find the aim point of cube i by search: the aim that puts it at distance ~0.
+    let bestAt = null, bd = Infinity;
+    for (let u = -24; u <= 24; u += 1) for (let v = -24; v <= 24; v += 1) {
+      setAim(probe, [u * 2, v * 2]);
+      const d = aimDistance(probe, i);
+      if (d < bd) { bd = d; bestAt = [u * 2, v * 2]; }
+    }
+    setAim(st, bestAt);
+    const hit = target(st, 0);
+    assert.ok(aimDistance(st, hit) <= aimDistance(st, i), 'nothing the camera sees is nearer the aim than the cube under it');
+  }
+  // Lifted, the front again.
+  assert.ok(setAim(st, null));
+  assert.equal(target(st, 0), front);
+  assert.equal(setAim(st, [1.5, 0]), false, 'an aim is whole aim points');
+  assert.equal(setAim(st, [1e9, 0]), false, 'and not off in the distance');
+});
+
+test('an aim is kept with the attempt: played back, the same cubes go', () => {
+  const L = buildLevel(8);
+  const a = new Attempt(cloneBoard(L.board));
+  const aims = [[0, 0], [30, -10], [-25, 20], null];
+  for (let k = 0; k < 8; k++) {
+    const b = a.board;
+    a.view((b.yaw + 300) % YAW_STEPS, b.pitch, k % 2 ? 0 : TURN, aims[k % aims.length]);
+    if (freeSlot(b) >= 0) a.send(readyLine(b, k));
+    for (let t = 0; t < 90; t++) tickGame(a.board);
+  }
+  const back = Attempt.restore(L.board, JSON.parse(JSON.stringify(a.save())));
+  assert.ok(back, 'the save plays back');
+  assert.deepEqual([back.board.h1, back.board.h2, back.board.cleared], [a.board.h1, a.board.h2, a.board.cleared]);
+  assert.ok(a.save().views.some(v => v.length === 6), 'the aims are in the save');
+  // A save with a broken aim is turned down.
+  const bad = JSON.parse(JSON.stringify(a.save()));
+  const k = bad.views.findIndex(v => v.length === 6);
+  bad.views[k][4] = 1e9;
+  assert.equal(Attempt.restore(L.board, bad), null);
 });
 
 // A 3 x 3 x 3 red block with one green cube in the middle of its back: in sight only from the back.
@@ -383,9 +465,11 @@ test('the view the player turns to is kept with the attempt: undo, save and rest
 test('fire() is one shot that lands at once, through the same launch and land', () => {
   const st = makeBoard(covered(2, 1));
   st.slots = [crew(0, 0, 1)];
-  assert.equal(fire(st, 0), LID);
+  const near = target(st, 0);
+  assert.notEqual(near, CORE);
+  assert.equal(fire(st, 0), near);
   assert.equal(st.flying.length, 0);
-  assert.equal(st.exposed[1].size, 1, 'the lid is gone, so green opens at once');
+  assert.equal(st.exposed[1].size, 1, 'a red cube beside it is gone, so green opens at once');
   assert.equal(launch(st, 0), null, 'a spent crew member has left');
 });
 
@@ -1190,12 +1274,13 @@ test('traps.mjs design reads a flag that comes before the model, and refuses a l
 });
 
 test('traps.mjs design --tune keeps no margin at a band edge of 0 or 100, as tools/pick-deals.mjs does', () => {
-  // The atom's deal 15 has three trap moments and a quick greedy look of 0, and the fish's deal 13 on four
-  // lines one trap moment and a quick greedy look of 99, inside the band [0, 100] a dealt sculpture has:
-  // a margin of 3 points at either edge would count them as misses, and with --steps=0 stop them undone.
-  // Tuning is done at once, and the full checks follow (holds and fire, not quick) and pass.
+  // The atom's deal 15 has three trap moments and a quick greedy look of 0, inside the band [0, 100] a
+  // dealt sculpture has, and level 6, the carousel, two trap moments and a forecast follower who wins
+  // 100%, inside its follow band of 92-100: a margin of 3 points at the greedy band's edge, or 2 at the
+  // follow band's, would count them as misses, and with --steps=0 stop them undone. Tuning is done at
+  // once, and the full checks follow (holds and fire, not quick) and pass.
   const design = args => spawnSync(process.execPath, ['tools/traps.mjs', 'design', ...args, '--tune', '--steps=0'], { cwd: fileURLToPath(new URL('..', import.meta.url)), encoding: 'utf8' });
-  for (const [args, moments] of [[['atom', '--crew=30,50', '--deal=15'], 3], [['fish', '--cols=4', '--crew=30,50', '--deal=13'], 1]]) {
+  for (const [args, moments] of [[['atom', '--crew=30,50', '--deal=15'], 3], [['--level=6'], 2]]) {
     const r = design(args);
     const out = JSON.parse(r.stdout.trim().split('\n').at(-1));
     assert.equal(r.status, 0, r.stdout + r.stderr);
