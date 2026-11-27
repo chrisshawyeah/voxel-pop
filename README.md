@@ -207,8 +207,8 @@ inner layers (`bands()` in `js/models.js`): under its skin, more colours by dept
 for each layer, which look the same from outside. Levels 1 to 3 are small floating sculptures that
 teach: the doughnut, the snail and the cocoa mug. The snail opens on purpose with parking and
 unlocking: its shell is packed with more green (the body's colour) and charcoal (the eyes'), so a
-crew member of those colours pops what shows and then waits on its pad for the rest. The mug has
-only two pads; its cocoa shows only from above, three cubes deep, and seals in caramel as yellow as
+crew member of those colours pops what shows and then waits on its pad for the rest, on one of only
+two pads. The mug has two pads as well; its cocoa shows only from above, three cubes deep, and seals in caramel as yellow as
 its stripe.
 
 Levels 4 to 20 are seventeen floating sculptures with cages, windows and overhangs (the beehive,

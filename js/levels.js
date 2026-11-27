@@ -47,7 +47,7 @@ import { makeBoard, cloneBoard, removeCube, revealLone, START_SLOTS, RULES, FLIG
 //           right away. The tests prove every one (tools/traps.mjs finds and checks them).
 export const LEVELS = [
   { name: 'Doughnut', model: 'donut', cols: 3, pads: 5, crew: [40, 60], hidden: 0, mix: 0, flip: 0, greedy: [95, 100], follow: [95, 100], undos: 0, deal: 0 },
-  { name: 'Snail', model: 'snail', cols: 4, pads: 3, crew: [50, 80], hidden: 0, mix: 0.1, flip: 0.5, greedy: [85, 95], follow: [95, 100], undos: 0, opening: 'park', deal: 27 },
+  { name: 'Snail', model: 'snail', cols: 4, pads: 2, crew: [60, 100], hidden: 0, mix: 0.2, flip: 0.8, greedy: [85, 95], follow: [95, 100], undos: 0, opening: 'park', deal: 46 },
   { name: 'Cocoa Mug', model: 'mug', cols: 3, pads: 2, crew: [60, 100], hidden: 0, mix: 0.1, flip: 0.8, greedy: [80, 95], follow: [95, 100], undos: 0, deal: 8 },
   { name: 'Beehive', model: 'beehive', pads: 3, hidden: 0, lines: ['brown 100, yellow 70, brown 60, yellow 80, grey 9', 'brown 63, charcoal 77, charcoal 70, yellow 80, charcoal 100, charcoal 100, yellow 70, white 6', 'yellow 64, yellow 100, brown 90'], solution: [0, 0, 2, 2, 0, 0, 0, 1, 1, 1, 1, 1, 1, 2, 1, 1], traps: [[7, 2], [8, 2]], greedy: [81, 99], follow: [92, 100], undos: 1 },
   { name: 'Ferris Wheel', model: 'ferris', pads: 3, hidden: 0, lines: ['red 40, teal 40, teal 50, teal 61, red 40, orange 50, grey 60, orange 60', 'red 40, blue 60, grey 54, grey 60, yellow 70, yellow 60', 'white 64, blue 60, white 70'], solution: [2,  2,  0,  0,  0,  1,  0,  1,  1,  2,  1,  1,  1,  0,  0,  0,  0], traps: [[7,  2],  [8,  0],  [8,  2],  [9,  0]], greedy: [64, 84], follow: [92, 100], undos: 1 },
