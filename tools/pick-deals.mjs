@@ -19,7 +19,9 @@
 //     now (tools/players.mjs curveMisses: at most 20 points easier than the level before, the
 //     median undos at most 4 over the level before's and at most 1 under);
 //   - on a level with `opening: 'park'`, most greedy plays (PARK_MIN %) park a crew member in
-//     their first three sends.
+//     their first three sends;
+//   - no crew member along that line looks ready and parks while more than three quarters of
+//     what it carries shows (tools/traps.mjs unfairMoments, Work item 14nov).
 // When no deal passes everything it keeps the one that misses least and says what it misses.
 // Deals with more than 30 crew are skipped. It prints one line per level and at the end the level
 // lines to copy into js/levels.js; --write writes them there, for one level or all of them. Picking
@@ -31,6 +33,7 @@ import { cpus } from 'node:os';
 import { fileURLToPath } from 'node:url';
 import { LEVELS, dealLevel, buildLevel, rng } from '../js/levels.js';
 import { greedyRate, greedyCheck, hastyCheck, forecastCheck, backtrackCheck, forecastFirst, measure, lineHolds, earlyParks, plan, firingTime, curveMisses, PARK_MIN } from './players.mjs';
+import { unfairMoments } from './traps.mjs';
 
 const args = process.argv.slice(2);
 const write = args.includes('--write');
@@ -78,6 +81,7 @@ function pick(n) {
   let near = null; // misses something, by the least so far
   let big = 0;     // deals skipped for having more than 30 crew
   let easy = 0;    // deals skipped because rushing never loses (the hasty greedy player wins them all)
+  let unfair = 0;  // deals skipped for a crew member that looks ready and parks a few cubes short
   let listed = 0;  // deals printed by --list
   const park = def0.opening === 'park';
   const t0 = Date.now();
@@ -96,6 +100,7 @@ function pick(n) {
       const p = plan(L.board, { budget: 30000, holds: line => lineHolds(L.board, line) });
       if (p.win !== true || !p.holds) continue;
       if (firingTime(L.board, p.line) > 30) continue;
+      if (unfairMoments(L.board, p.line).length) { unfair++; continue; }
       if (park && earlyParks(L.board) < PARK_MIN) continue;
       const rate = greedyCheck(L.board);
       const hasty = hastyCheck(L.board);
@@ -120,7 +125,8 @@ function pick(n) {
   }
   if (listed) return done({ listed }); // --list: the deals are printed above, none is picked
   if (best || near) return done(best || near);
-  const why = (big ? `, ${big} deals skipped for more than 30 crew (use bigger crew)` : '') + (easy ? `, ${easy} skipped as too easy (rushing always won)` : '');
+  const why = (big ? `, ${big} deals skipped for more than 30 crew (use bigger crew)` : '') + (easy ? `, ${easy} skipped as too easy (rushing always won)` : '')
+    + (unfair ? `, ${unfair} skipped for a crew member that looks ready and parks while more than three quarters of it shows` : '');
   return { n, error: `no deal the planning player wins with a line that holds when sends overlap${park ? ' (and that opens with a parked crew member)' : ''}${why}`, ms: Date.now() - t0 };
 }
 

@@ -229,6 +229,17 @@ a trap, `node tools/traps.mjs design <sculpture> --deal=N` starts from one and m
 and along the lines, keeping each change that leaves the level won and closer to a trap (the
 beehive's, Ferris wheel's and carousel's lines were made this way).
 
+A trap is fair only when you can see it coming. A person sees about how many cubes of a colour
+show, not the exact number, so a crew member carrying 100 against 90 showing cannot be told from
+one that will finish, while 75 showing can. So no level is made with a moment where a front crew
+member looks ready and, sent, parks while more than three quarters of what it carries shows
+(Work item 14nov). What shows is counted as the screen shows it: the cubes of that colour seen over
+one turn of the sculpture from below, from the level's own height and from above
+(`inSight()` in `tools/traps.mjs`). `node tools/traps.mjs fair` lists every such moment along each
+level's solution (`fair 5` for one level); `search` prints how many a deal has and measures none
+that has one, `design` gets rid of them before anything else, the deal picker skips any deal that
+has one, and `node tools/difficulty.mjs` counts them in its last column.
+
 After changing a dealt level's settings (levels 1 to 3), pick a deal for them, then check every level:
 
     node tools/pick-deals.mjs 12            # level 12: prints its new line to copy in

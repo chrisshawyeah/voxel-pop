@@ -9,15 +9,17 @@
 //                                         deals the sculpture with those settings, deal after deal,
 //                                         and prints each one whose solution has one to three
 //                                         moments with a trap, written out as `lines` to copy
-//                                         into js/levels.js; with --measure, only deals whose
-//                                         planned line holds and fires within 30 s, and those
-//                                         with traps measured as tools/difficulty.mjs does
+//                                         into js/levels.js, with how many unfair moments it has;
+//                                         with --measure, only deals whose planned line holds and
+//                                         fires within 30 s, and those with traps and no unfair
+//                                         moment measured as tools/difficulty.mjs does
 //   node tools/traps.mjs design globe --cols=3 --pads=3 --crew=70,110 --hidden=1 --deal=4
 //        [--seed=1 --steps=200]
 //                                         starts from that deal and moves crew between and along
 //                                         the lines, one change at a time, keeping a change that
-//                                         leaves the level won with at least as many trap moments,
-//                                         until one to three moments have a trap; then prints it
+//                                         leaves the level won with no more unfair moments and at
+//                                         least as many trap moments, until none is unfair and one
+//                                         to three moments have a trap; then prints it
 //                                         as `lines`, measured, like search --measure
 //   node tools/traps.mjs design --level=6 [--seed=1 --steps=200 --tune --undos=0]
 //                                         the same, starting from level 6's own lines; with
@@ -30,15 +32,22 @@
 //                                         level's (or --undos), keeping one to three moments;
 //                                         done only when the full measures pass as the level tests
 //                                         want them, or it prints done: false and the misses
+//   node tools/traps.mjs fair [14]        every level's unfair moments along its solution (levels
+//                                         without one, along the planning player's line), or
+//                                         "fair"; exit 1 when any level has one
 //
 // A trap [k, j]: after the first k sends of the solution (each followed by waiting until the pads
 // stop, as the planning player plays), sending line j instead loses whatever comes after, and
 // line j's front crew member has cubes of its colour on the outside, so it looks ready. The checks
 // look with every hidden crew member known, so a trap loses even for a player who could see them.
+//
+// An unfair moment (Work item 14nov): a front crew member that looks ready, parks if it is sent,
+// though more than three quarters of what it carries shows on the screen. Search, design and
+// tools/pick-deals.mjs keep no deal or change with one.
 import { pathToFileURL } from 'node:url';
 import { LEVELS, buildLevel, dealLevel, modelFor, rng } from '../js/levels.js';
 import { MODELS } from '../js/models.js';
-import { cloneBoard, deploy, settle, revealLone } from '../js/logic.js';
+import { cloneBoard, deploy, settle, revealLone, forecast, seen, pitchUnits, START_PITCH, TURN, VIEW_STEP, YAW_STEPS } from '../js/logic.js';
 import { plan, lineHolds, firingTime, greedyCheck, hastyCheck, forecastCheck, backtrackCheck, greedyRate, hastyRate } from './players.mjs';
 
 const BUDGET = 30000;
@@ -72,6 +81,66 @@ export function loses(st, j, budget = BUDGET) {
 
 // Line j's front crew member looks ready on settled board st: cubes of its colour are on the outside.
 export const tempting = (st, j) => st.columns[j].length > 0 && st.exposed[st.columns[j][0].color].size > 0;
+
+// ---------- fair counts (Work item 14nov) ----------
+// Chris, November 27th: "just leaving one hidden is really feels kind of cruel". A person sees
+// about how many cubes of a colour show, not the exact number, so a crew member that looks ready
+// and then parks has to look short: what shows of its colour is at most FAIR of what it carries.
+// 75 showing against 100 carried is a comparison a person makes; 90 against 100 is not.
+export const FAIR = 0.75;
+// The heights the count is taken from: from below, the height a level starts at, and from above.
+const LOOKS = [pitchUnits(-0.8), START_PITCH, pitchUnits(1.2)];
+
+// How many cubes of colour c the screen shows over one turn of the sculpture at each of those
+// heights: the cubes on the outside that seen() finds from some step of a turn. Worked out on a
+// copy, so the board's own view stays as it is.
+export function inSight(st, c) {
+  const sim = cloneBoard(st), shown = new Set();
+  sim.spin = TURN;
+  for (const pitch of LOOKS) {
+    sim.pitch = pitch;
+    for (let v = 0; v < YAW_STEPS / VIEW_STEP; v++) {
+      sim.yaw = v * VIEW_STEP;
+      for (const i of st.exposed[c]) if (!shown.has(i) && seen(sim, i)) shown.add(i);
+    }
+  }
+  return shown.size;
+}
+
+// The fronts on settled board st that look ready, park if sent alone, and show more than FAIR of
+// what they carry: [{ j, color, count, shows, left }]. The cheap test goes first: a colour with no
+// more than FAIR of the crew member's number on the outside cannot show more than that.
+export function unfairFronts(st) {
+  const out = [];
+  st.columns.forEach((col, j) => {
+    const s = col[0];
+    if (!s || st.exposed[s.color].size <= FAIR * s.count) return;
+    const f = forecast(st, j);
+    if (!f || f.finishes) return;
+    const shows = inSight(st, s.color);
+    if (shows > FAIR * s.count) out.push({ j, color: s.color, count: s.count, shows, left: f.left });
+  });
+  return out;
+}
+
+// Every unfair moment along `line` (a winning order of sends), on the boards the planning player
+// sends from, the pads stopped after each send: [{ k, j, color, count, shows, left }], k the sends
+// made before it. The line's own sends count too: a crew member left a few cubes short is as
+// cruel when it is the right send.
+export function unfairMoments(board, line) {
+  const st = known(board), out = [];
+  settle(st);
+  for (let k = 0; k < line.length; k++) {
+    for (const u of unfairFronts(st)) out.push({ k, ...u });
+    if (!deploy(st, line[k])) throw new Error(`send ${k + 1} of the line cannot happen`);
+    settle(st);
+  }
+  return out;
+}
+
+// One unfair moment in words.
+export const sayUnfair = (u, names) =>
+  `after ${u.k} send${u.k === 1 ? '' : 's'}, line ${u.j + 1}'s ${names[u.color]} ${u.count} shows ${u.shows} and parks with ${u.left}`;
 
 // Every trap along `line` (a winning order of sends): [[k, j], ...].
 export function findTraps(board, line, budget = BUDGET) {
@@ -128,6 +197,15 @@ if (cmd === 'check') {
   const n = levelAt(arg), L = buildLevel(n);
   const line = L.def.solution || plan(L.board).line;
   console.log(JSON.stringify({ level: n + 1, solution: line, traps: line ? findTraps(L.board, line) : null }));
+} else if (cmd === 'fair') {
+  let bad = 0;
+  for (const n of arg ? [levelAt(arg)] : LEVELS.map((_, k) => k)) {
+    const L = buildLevel(n), line = L.def.solution || plan(L.board).line;
+    const u = line ? unfairMoments(L.board, line) : null;
+    console.log(`${n + 1} ${L.def.name}: ${!u ? 'no winning line found' : u.length ? u.map(x => sayUnfair(x, L.model.names)).join('; ') : 'fair'}`);
+    bad += u ? u.length : 1;
+  }
+  process.exitCode = bad ? 1 : 0;
 } else if (cmd === 'search') {
   const def = {
     name: arg, model: sculptureNamed(arg), cols: Number(opt('cols', 4)), pads: Number(opt('pads', 4)),
@@ -148,8 +226,10 @@ if (cmd === 'check') {
     if (measure && !(fire <= 30)) { console.log(JSON.stringify({ deal, win: true, fire })); continue; }
     const traps = findTraps(L.board, p.line);
     const moments = new Set(traps.map(t => t[0])).size;
-    const out = { deal, win: true, moments, traps, solution: p.line, lines: linesOf(L.board, names), pads: def.pads, crew: L.shooters, fire };
-    if (measure && moments >= 1 && moments <= 3) {
+    // A deal with an unfair moment is printed with how many, and not measured: it is not one to take.
+    const unfair = unfairMoments(L.board, p.line).length;
+    const out = { deal, win: true, moments, unfair, traps, solution: p.line, lines: linesOf(L.board, names), pads: def.pads, crew: L.shooters, fire };
+    if (measure && moments >= 1 && moments <= 3 && !unfair) {
       const fc = forecastCheck(L.board), back = backtrackCheck(L.board);
       Object.assign(out, { greedy: greedyCheck(L.board), hasty: hastyCheck(L.board), follow: fc.rate, undos: back.undos, backRate: back.rate });
     }
@@ -176,13 +256,15 @@ if (cmd === 'check') {
     return st;
   };
   const playable = cs => cs.every(col => col.length && !col[0].hidden && col.every((s, k) => !(s.hidden && col[k - 1]?.hidden)));
-  // A change is judged by its trap moments first, then by how close a tempting send comes to one:
-  // how many pads it leaves taken once the pads stop, and how many shots are left parked on them.
+  // A change is judged by its unfair moments first (each costs 100 points, so a board with fewer
+  // ranks above every board with more, and a lost board below them all), then by its trap moments,
+  // then by how close a tempting send comes to one: how many pads it leaves taken once the pads
+  // stop, and how many shots are left parked on them.
   const judge = cs => {
     const st = boardOf(cs);
     // Tuning plans as the level tests do, for a line that also wins with the sends overlapping.
     const p = plan(st, tune ? { holds: line => lineHolds(st, line) } : { budget: 60000 });
-    if (!p.win) return { score: -1 };
+    if (!p.win) return { score: -Infinity };
     const traps = [];
     let near = 0;
     for (let k = 0; k < p.line.length; k++) {
@@ -198,7 +280,8 @@ if (cmd === 'check') {
       }
     }
     const moments = new Set(traps.map(t => t[0])).size;
-    const r = { score: (moments > 3 ? 3 - moments / 10 : moments) * 10 + near, moments, traps, line: p.line, st };
+    const unfair = unfairMoments(st, p.line).length;
+    const r = { score: (moments > 3 ? 3 - moments / 10 : moments) * 10 + near - 100 * unfair, moments, unfair, traps, line: p.line, st };
     // Tuning: with its moments in place, a change is judged by how far rushing wins above waiting
     // and the greedy player sits outside the level's band (quick looks; the full measures follow),
     // 3 points inside it except at 0 or 100, as tools/pick-deals.mjs keeps it; and a win every time
@@ -211,6 +294,8 @@ if (cmd === 'check') {
     // with its moments in place still ranks above every board without them.
     // A line that does not hold, or takes over 30 s to fire, misses most of all. The firing time and
     // the follower's and undo player's measures are kept on the result, for the end not to run them again.
+    // A board with an unfair moment is not measured: it has to lose its unfair moments first.
+    if (unfair) return r;
     if (tune && moments >= 1 && moments <= 3 && (!p.holds || !((r.fire = firingTime(st, p.line)) <= 30))) r.score = 40 - 0.3;
     else if (tune && moments >= 1 && moments <= 3) {
       const g = greedyRate(st, rng(1777), 120), h = hastyRate(st, rng(1778), 120);
@@ -234,7 +319,7 @@ if (cmd === 'check') {
     }
     return r;
   };
-  const settled = b => b.moments >= 1 && b.moments <= 3 && (!tune || b.miss === 0);
+  const settled = b => b.moments >= 1 && b.moments <= 3 && !b.unfair && (!tune || b.miss === 0);
   let best = judge(cols);
   for (let step = 0; step < steps && !settled(best); step++) {
     const next = cols.map(col => col.map(s => ({ ...s })));
@@ -244,9 +329,9 @@ if (cmd === 'check') {
     else { const [s] = next[a].splice(i, 1); next[b].splice(Math.floor(rand() * (next[b].length + 1)), 0, s); } // one moves to another place
     if (!playable(next) || JSON.stringify(next) === JSON.stringify(cols)) continue;
     const r = judge(next);
-    if (r.score >= best.score) { cols = next; best = r; console.log(JSON.stringify({ step, moments: r.moments, score: r.score, quick: r.quick, lines: r.st && linesOf(r.st, names) })); }
+    if (r.score >= best.score) { cols = next; best = r; console.log(JSON.stringify({ step, moments: r.moments, unfair: r.unfair, score: r.score, quick: r.quick, lines: r.st && linesOf(r.st, names) })); }
   }
-  if (!settled(best)) { console.log(JSON.stringify({ done: false, moments: best.moments, quick: best.quick })); process.exit(1); }
+  if (!settled(best)) { console.log(JSON.stringify({ done: false, moments: best.moments, ...best.unfair && { unfair: best.unfair }, quick: best.quick })); process.exit(1); }
   const st = best.st;
   // Tuning settles only on a line that holds and fires within 30 s, and on a level with its follower
   // and undos measured, all on this board with fixed seeds as it was judged: those are not run again.

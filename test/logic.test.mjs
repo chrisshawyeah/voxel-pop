@@ -1190,12 +1190,14 @@ test('traps.mjs design reads a flag that comes before the model, and refuses a l
 });
 
 test('traps.mjs design --tune keeps no margin at a band edge of 0 or 100, as tools/pick-deals.mjs does', () => {
-  // The atom's deal 15 has three trap moments and a quick greedy look of 0, and the fish's deal 13 on four
-  // lines one trap moment and a quick greedy look of 99, inside the band [0, 100] a dealt sculpture has:
+  // The rocket's deal 12 on two pads has two trap moments and a quick greedy look of 0, and the fish's deal
+  // 13 on four lines one trap moment and a quick greedy look of 99, inside the band [0, 100] a dealt sculpture has:
   // a margin of 3 points at either edge would count them as misses, and with --steps=0 stop them undone.
   // Tuning is done at once, and the full checks follow (holds and fire, not quick) and pass.
   const design = args => spawnSync(process.execPath, ['tools/traps.mjs', 'design', ...args, '--tune', '--steps=0'], { cwd: fileURLToPath(new URL('..', import.meta.url)), encoding: 'utf8' });
-  for (const [args, moments] of [[['atom', '--crew=30,50', '--deal=15'], 3], [['fish', '--cols=4', '--crew=30,50', '--deal=13'], 1]]) {
+  // (The 0 was the atom's deal 15 until 14nov: that board has crew members that park a few cubes short, so
+  // design no longer settles it.)
+  for (const [args, moments] of [[['rocket', '--pads=2', '--crew=60,110', '--deal=12'], 2], [['fish', '--cols=4', '--crew=30,50', '--deal=13'], 1]]) {
     const r = design(args);
     const out = JSON.parse(r.stdout.trim().split('\n').at(-1));
     assert.equal(r.status, 0, r.stdout + r.stderr);
