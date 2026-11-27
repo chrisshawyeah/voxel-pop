@@ -230,6 +230,100 @@ export function backtrack(board, rand, cap = 50, land = LAND) {
   }
 }
 
+// ---------- a person (Work item 14nov) ----------
+// Chris, November 27th: "if I mess up a few times before I can get it that's ideal ... if I fail on
+// something ten times I'm probably going to give up". A person sees about how many cubes of a colour
+// show, not the exact number, and remembers the order they sent in the try before. person() plays so:
+//   - it waits for the pads to stop before each send, as the planning and forecast players do, and
+//     never holds a front for its forecast;
+//   - it guesses what shows of each front's colour (guessShows: the cubes of it on the outside, which
+//     at the start of levels 5, 11 and 17 is within 1% of what the screen shows, tools/traps.mjs
+//     inSight) about COUNT_ERROR off, a new guess at each look, against the crew member's number. It
+//     sends a front it guesses will finish, at random among them; else the ready front whose guess
+//     comes closest to its number; else any front;
+//   - out of room, it starts the level again: a new try. It sends the order of the try before up to
+//     its mistake, the crew member that sat on its pad longest (the earliest send still parked when
+//     it ran out of room), and there sends something else. (Blaming the latest send still parked
+//     instead left half the plays of the globe unwon after ten tries, where a person who watches
+//     the pads sees which crew member sat there all along: November 27th, every level, 40 plays.) A place where it has tried every line already counts the send
+//     before it as the mistake; once every first send has been blamed, it forgets what it blamed and
+//     plays the next try afresh.
+// { win, tries (the try that won; TRY_CAP when none did), sends (over every try), orders (each try's
+// sends, the lines by number) }.
+export const COUNT_ERROR = 0.15;
+export const TRY_CAP = 10;
+
+// One guess of n cubes, COUNT_ERROR off on average in the way a person's guesses spread: a normal
+// spread with that share of n as its standard deviation (never below none).
+export function guessShows(n, rand, error = COUNT_ERROR) {
+  let u = 0;
+  while (!u) u = rand();
+  return Math.max(0, n * (1 + error * Math.sqrt(-2 * Math.log(u)) * Math.cos(2 * Math.PI * rand())));
+}
+
+export function person(board, rand, cap = TRY_CAP, error = COUNT_ERROR) {
+  const avoid = new Map(); // the sends of a try so far, as text, to the lines it will not send next from there
+  const orders = [];
+  let last = [], sends = 0;
+  for (let t = 1; t <= cap; t++) {
+    const st = cloneBoard(board);
+    const order = [], crew = [];
+    let mistake = -1;
+    for (;;) {
+      settle(st);
+      if (isWon(st)) { orders.push(order); return { win: true, tries: t, sends, orders }; }
+      const no = avoid.get(order.join(',')) || new Set();
+      const fronts = [];
+      st.columns.forEach((c, i) => { if (c.length && !no.has(i)) fronts.push(i); });
+      if (isJammed(st) || freeSlot(st) < 0) {
+        const parked = new Set(st.slots.filter(Boolean).map(x => x.id));
+        for (let k = 0; k < crew.length && mistake < 0; k++) if (parked.has(crew[k])) mistake = k;
+        if (mistake < 0) mistake = order.length - 1;
+        break;
+      }
+      if (!fronts.length) { mistake = order.length - 1; break; } // every line tried from here already
+      let ci;
+      const again = last[order.length];
+      if (order.join(',') === last.slice(0, order.length).join(',') && again !== undefined && fronts.includes(again)) ci = again;
+      else {
+        const looks = fronts.filter(i => st.exposed[st.columns[i][0].color].size > 0)
+          .map(i => [i, guessShows(st.exposed[st.columns[i][0].color].size, rand, error) / st.columns[i][0].count]);
+        const enough = looks.filter(([, g]) => g >= 1).map(([i]) => i);
+        if (enough.length) ci = enough[Math.floor(rand() * enough.length)];
+        else if (looks.length) ci = looks.reduce((a, x) => (x[1] > a[1] ? x : a))[0];
+        else ci = fronts[Math.floor(rand() * fronts.length)];
+      }
+      order.push(ci);
+      crew.push(deploy(st, ci).shooter.id);
+      sends++;
+    }
+    orders.push(order);
+    // Every first send has been blamed already: it was not where it went wrong after all. The person
+    // forgets what it blamed and plays the next try afresh.
+    if (mistake < 0) { avoid.clear(); last = []; continue; }
+    const at = order.slice(0, mistake).join(',');
+    if (!avoid.has(at)) avoid.set(at, new Set());
+    avoid.get(at).add(order[mistake]);
+    last = order.slice(0, mistake);
+  }
+  return { win: false, tries: cap, sends, orders };
+}
+
+// The person's measure, from a fixed seed: { rate (% of plays won within TRY_CAP tries), tries (median
+// tries of the plays won), within3 (% of plays won in three tries or fewer), sends (median per play) }.
+export const PERSON_PLAYS = 40;
+export function personMeasure(board, seed = 782, plays = PERSON_PLAYS) {
+  const rand = rng(seed);
+  const won = [], sends = [];
+  for (let k = 0; k < plays; k++) {
+    const r = person(board, rand);
+    if (r.win) won.push(r.tries);
+    sends.push(r.sends);
+  }
+  return { rate: Math.round((100 * won.length) / plays), tries: median(won), within3: Math.round((100 * won.filter(t => t <= 3).length) / plays), sends: median(sends) };
+}
+export const personCheck = board => personMeasure(board, 782, PERSON_PLAYS);
+
 // ---------- the curve: how much the forecast plays for you, level by level ----------
 // Each level's `follow` band (js/levels.js) is the share of plays, in %, that the forecast
 // follower (forecastCheck: forecastFirst, never undoing) must win, and its `undos` the most undos

@@ -180,7 +180,12 @@ whatever the forecast says finishes and strands nobody, waiting for the pads to 
 (`forecastFirst`) or tapping every 150 ms (`hastyForecast`, printed only, and measured only with
 `HASTY_FOLLOWER=1 npm test`: on the big boards it takes most of an hour); and the same follower with undo,
 taking back its last send when out of room and never trying a lost board twice, at most 50 undos
-(`backtrack`). A level with `opening: 'park'` (level 2, the snail) must have most greedy plays park
+(`backtrack`). And a *person* (`person`, Work item 14nov), who plays as Chris does: it guesses how many
+cubes of a front's colour show about 15 percent off, against the crew member's number, sends one it
+guesses will finish, never holds a front for the forecast, and when it runs out of room starts the
+level again, sending the same order up to the crew member that sat on its pad longest and something
+else there, at most ten tries; `node tools/difficulty.mjs` prints how many of its plays win within
+three tries and within ten, and the median tries. A level with `opening: 'park'` (level 2, the snail) must have most greedy plays park
 someone in their first three sends. And a winning line, sent the moment a pad frees, must take at
 most 30 seconds to fire (`firingTime()`, on the game's clock).
 
