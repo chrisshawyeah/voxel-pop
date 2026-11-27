@@ -75,6 +75,12 @@ let stage = {
 };
 let stageReady = false;
 function loadStage() {
+  // Its three files at once: imported one by one, each would wait for the one before it to arrive.
+  for (const href of ['js/render.js', 'vendor/three.module.js', 'vendor/three.core.js']) {
+    const link = document.createElement('link');
+    link.rel = 'modulepreload'; link.href = href;
+    document.head.append(link);
+  }
   import('./render.js').then(({ Stage }) => {
     const real = new Stage($('gl')), wait = stage;
     if (wait.loaded) real.load(...wait.loaded);
