@@ -272,7 +272,7 @@ function renderQueues(slide = true) {
       if (!k) {
         slot.type = 'button';
         frontEvents(slot, ci);
-        el.appendChild(markEl());
+        el.append(' ', markEl()); // the space keeps the number and the mark two words, as the front's name says them
         const tip = document.createElement('span');
         tip.className = 'tip';
         tip.hidden = true;
@@ -282,7 +282,8 @@ function renderQueues(slide = true) {
       } else {
         if (k === 1) {
           slot.type = 'button';
-          slot.setAttribute('aria-label', `Line ${ci + 1}: see all ${col.length} crew`);
+          // Its name starts with the number it shows, so a player who speaks to the screen can say it (18nov).
+          slot.setAttribute('aria-label', `${s.hidden ? '?' : s.count}, line ${ci + 1}: see all ${col.length} crew`);
         }
         slot.addEventListener('click', () => preview(ci));
       }
@@ -501,9 +502,15 @@ function labelFronts(now = false) {
     if (!el || !s) return;
     const ready = st.exposed[s.color].size > 0;
     const f = forecastFor(ci);
-    el.parentNode.setAttribute('aria-label', `Send ${crewName(s)}, ${ready ? 'ready' : 'covered, other cubes hide its colour'}, ${fcWords(f)}`);
+    // The name starts with what the front shows, its number and the mark's words while the marks show,
+    // so a player who speaks to the screen can say it (18nov).
+    const shown = [s.hidden ? '?' : s.count, marksShown() && f ? markText(f) : ''].filter(Boolean).join(' ');
+    el.parentNode.setAttribute('aria-label', `${shown}: send ${crewName(s)}, ${ready ? 'ready' : 'covered, other cubes hide its colour'}, ${fcWords(f)}`);
   });
 }
+
+// The words of the mark under a front: none for the tick, else "strands" or "parks 12".
+const markText = f => (cleanSend(f) ? '' : f.finishes ? 'strands' : `parks ${f.left}`);
 
 function showReach() {
   const marks = marksShown();
@@ -522,7 +529,7 @@ function showReach() {
     fc.hidden = !marks || !f;
     if (!fc.hidden) {
       fc.className = cleanSend(f) ? 'fc done' : 'fc park';
-      fc.innerHTML = cleanSend(f) ? TICK : f.finishes ? 'strands' : `parks ${f.left}`;
+      fc.innerHTML = cleanSend(f) ? TICK : markText(f);
     }
     const tip = el.parentNode.querySelector('.tip');
     tip.hidden = !open;
